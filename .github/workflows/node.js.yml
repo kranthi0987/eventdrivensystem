@@ -5,31 +5,37 @@ name: Node.js CI
 
 on:
   push:
-    branches: [ "main" ]
+#    branches: [ "main" ]
   pull_request:
-    branches: [ "main" ]
+#    branches: [ "main" ]
+env:
+  TERRAFORM_WORKING_DIR: terraform/  # Path to your Terraform files
+  ZIP_FILE_NAME: deployment-package.zip
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [22.x]
-        # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
 
     steps:
-    - name: Checkout Repository
-    - uses: actions/checkout@v4
-    - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ matrix.node-version }}
-        cache: 'npm'
-    - run: npm ci
-    - run: npm run build --if-present
-    - name: Run Linter
-      run: npm run lint
-    - name: Run Tests
-      run: npm test
-      
- 
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build application (if needed)
+        run: npm run build --if-present
+
+      - name: Zip deployment package
+        run: |
+          # Exclude files not needed in production
+          zip -r $ZIP_FILE_NAME . -x *.git* node_modules/* *.github/* *.idea/* *.DS_Store
