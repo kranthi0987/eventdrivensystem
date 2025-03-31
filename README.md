@@ -1,49 +1,122 @@
-# eventdrivensystem
+# Event-Driven System
 
+A modern event-driven system built with Node.js, TypeScript, and AWS services.
 
-Solve a problem as described below
+## Architecture
 
-We are working on connecting two applications. Let's call them `source` and `target` application.
+The system is built with the following components:
 
-- Source application wants to call our API every time an event occurs
-  - event structure `{ id: '<randomId>', name: 'test event', body: 'test body', timestamp: '<currentTimestamp>' }`
-  - source application sends each event only once and requires 2xx response in 500ms. If source application will not receive 2xx response within 500ms then considers that this event delivery has failed and is not resending it again
-  - please mock the API calls from the source application
+- **Frontend**: React/TypeScript application
+- **Backend**: Node.js/TypeScript API with GraphQL
+- **Infrastructure**: AWS services managed by Terraform
+- **CI/CD**: GitHub Actions
+- **Containerization**: Docker
+- **Database**: Amazon RDS (PostgreSQL)
+- **Caching**: Amazon ElastiCache (Redis)
+- **Message Queue**: Amazon SQS
+- **Container Orchestration**: Amazon ECS
+- **Load Balancing**: Application Load Balancer
 
-- Target application needs to receive all the events
-  - target application is a GraphQL API - please mock API calls to the target application
-  - event structure needs to be enhanced by adding `{ brand: 'testBrand' }` as the target application requires it. Mind that this information is not flowing from the source application
-  - the target application is rate-limited. In most cases, events from source application are flowing more frequently than the target application is able to consume them. Please make sure the designed solution will take that into consideration
+## Prerequisites
 
-The goal is to create a `system`, to connect above. As shown in the below graph
+- Node.js 18.x
+- Docker
+- AWS CLI
+- Terraform 1.5.x
+- GitHub account
+- AWS account with appropriate permissions
 
-```mermaid
-graph LR
-A[Source Applcation] -- System to be created --> C[Target Application]
-```
+## Local Development Setup
 
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/eventdrivensystem.git
+   cd eventdrivensystem
+   ```
 
-### Considerations
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
 
-- System needs to be working in the cloud
-- Deployment must be through CI/CD pipeline
-- System needs to be secure (authentication)
-- System needs to be highly available
-- We need to have full visibility on events flowing between `source` and `target` systems
-- We need to be able to trace the flow of every single event
-- Everything must be covered with tests
-- Everything needs to be properly documented, with HLD and LLD included
-- System needs to be easy to maintain and support
-- All errors/issues need to be visible and handled properly
-- We want to see the source code and the working application
-- We want to see not only the solution but also how you think and your working process, so please keep all your commits accessible, don't squash them, and use proper naming standards for them
+3. Create a `.env` file in the root directory:
+   ```env
+   NODE_ENV=development
+   PORT=3000
+   DATABASE_URL=postgresql://user:password@localhost:5432/eventdrivensystem
+   REDIS_URL=redis://localhost:6379
+   AWS_REGION=us-east-1
+   ```
 
-### Required Technology
+4. Start the development server:
+   ```bash
+   npm run dev
+   ```
 
-- Use Node (TypeScript) or GO as a programming language
-- Use Terraform to provision the infrastructure
-- Use AWS or GCP
+## Infrastructure Setup
 
-### Delivery
+1. Configure AWS credentials:
+   ```bash
+   aws configure
+   ```
 
-If your repository is private, please share it with daniel.rosiak@chalhoub.com and bilal.abdallah@faces.com
+2. Create an S3 bucket for Terraform state:
+   ```bash
+   aws s3api create-bucket --bucket eventdrivensystem-terraform-state --region us-east-1
+   ```
+
+3. Initialize Terraform:
+   ```bash
+   cd terraform
+   terraform init
+   ```
+
+4. Apply the infrastructure:
+   ```bash
+   terraform apply
+   ```
+
+## CI/CD Setup
+
+1. Fork the repository to your GitHub account
+
+2. Add the following secrets to your GitHub repository:
+   - `AWS_ACCESS_KEY_ID`
+   - `AWS_SECRET_ACCESS_KEY`
+   - `DB_PASSWORD`
+
+3. Push to the main branch to trigger the CI/CD pipeline
+
+## Deployment
+
+The system is automatically deployed when changes are pushed to the main branch. The deployment process includes:
+
+1. Running tests
+2. Building Docker image
+3. Pushing to Amazon ECR
+4. Updating ECS service
+5. Applying infrastructure changes via Terraform
+
+## Monitoring and Logging
+
+- Application logs are available in CloudWatch Logs
+- Metrics are collected via CloudWatch Metrics
+- Alarms are configured for critical metrics
+
+## Security
+
+- All sensitive data is stored in AWS Secrets Manager
+- Network security is managed through VPC, security groups, and NACLs
+- SSL/TLS encryption is enforced
+- IAM roles and policies follow the principle of least privilege
+
+## Contributing
+
+1. Create a feature branch
+2. Make your changes
+3. Run tests: `npm test`
+4. Submit a pull request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
