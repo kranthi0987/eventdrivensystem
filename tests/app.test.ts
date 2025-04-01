@@ -3,12 +3,17 @@ import app  from '../apps/bridge-service/src/app';
 import { jwtConfig,JWTService } from 'shared-auth';
 import { Server } from 'http';
 import chalk from 'chalk';
+
+// Configure test timeout
+jest.setTimeout(10000); // 10 seconds
+
 function logSuccess(expect: jest.Expect) {
     console.log(chalk.green(`✓ ${expect.getState().currentTestName} - passed`));
 }
 
 describe('Event API Tests', () => {
     let validToken: string;
+    let server: Server;
     const testEvent = {
         id: expect.any(String),
         name: 'test event',
@@ -17,10 +22,18 @@ describe('Event API Tests', () => {
     };
 
     beforeAll(() => {
-        const jwtService = new JWTService(jwtConfig);
-        validToken = jwtService.generateToken({
-            service: 'source',
-            id: 'test-suite'
+        server = app.listen(0, () => {
+            const jwtService = new JWTService(jwtConfig);
+            validToken = jwtService.generateToken({
+                service: 'source',
+                id: 'test-suite'
+            });
+        });
+    });
+    afterAll((done) => {
+        server.close(() => {
+            // Additional cleanup if needed
+            done();
         });
     });
 
@@ -80,14 +93,14 @@ describe('Event API Tests', () => {
 });
 
 describe('API Health Check', () => {
-    let server: Server;
+    let healthServer: Server;
 
     beforeAll((done) => {
-        server = app.listen(0, done);
+        healthServer = app.listen(0, done);
     });
 
     afterAll((done) => {
-        server.close(done);
+        healthServer.close(done);
     });
 
 

@@ -13,7 +13,7 @@
     "clean": "./scripts/clean.sh",
     "lint": "eslint 'apps/**/*.ts'",
     "lint:fix": "eslint . --fix",
-    "test": "jest"
+    "test": "jest --runInBand --forceExit "
   },
   "dependencies": {
     "apollo-server-express": "^3.12.0",
