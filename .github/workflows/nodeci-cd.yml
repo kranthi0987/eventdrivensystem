@@ -11,13 +11,13 @@ env:
   EB_APPLICATION_NAME: eventdrivensystem
   EB_ENVIRONMENT_NAME: eventdrivensystem-prod
   TERRAFORM_WORKING_DIR: terraform/  # Path to your Terraform files
-  ZIP_FILE_NAME: deployment-package.zip
+  ZIP_FILE_NAME: deploy.zip
 
 jobs:
   build-zip:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       
       - name: Setup Node.js
         uses: actions/setup-node@v3
@@ -55,17 +55,22 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Create EB Application if not exists
+      - name: Verify/Create EB Application
         run: |
-          if ! aws elasticbeanstalk describe-applications \
-            --application-names ${{ env.EB_APPLICATION_NAME }} \
-            --region ${{ env.AWS_REGION }}; then
-          
-            aws elasticbeanstalk create-application \
-              --application-name ${{ env.EB_APPLICATION_NAME }} \
-              --description "Event Driven System" \
-              --region ${{ env.AWS_REGION }}
-          fi
+            # Check if application exists
+            if ! aws elasticbeanstalk describe-applications \
+              --application-names ${{ env.EB_APPLICATION_NAME }} \
+              --region ${{ env.AWS_REGION }} &> /dev/null; then
+            
+              echo "Creating EB application..."
+              aws elasticbeanstalk create-application \
+                --application-name ${{ env.EB_APPLICATION_NAME }} \
+                --description "Event Driven System" \
+                --region ${{ env.AWS_REGION }}
+            
+              # Wait for application to be ready
+              sleep 10
+            fi
 
   deploy:
     needs: create-eb-app
@@ -73,10 +78,10 @@ jobs:
     if: github.ref == 'refs/heads/main'
     
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -112,7 +117,7 @@ jobs:
           application_name: ${{ env.EB_APPLICATION_NAME }}
           environment_name: ${{ env.EB_ENVIRONMENT_NAME }}
           region: ${{ env.AWS_REGION }}
-          deployment_package: deploy.zip
+          deployment_package: ${{ env.ZIP_FILE_NAME }}
           version_label: ${{ steps.version.outputs.version }}
           wait_for_deployment: true
 
