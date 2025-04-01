@@ -14,7 +14,7 @@ env:
   ZIP_FILE_NAME: deployment-package.zip
 
 jobs:
-  build:
+  build-zip:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -43,7 +43,7 @@ jobs:
           zip -r $ZIP_FILE_NAME . -x *.git* node_modules/* *.github/* *.idea/* *.DS_Store
 
   deploy:
-    needs: test
+    needs: build-zip
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     
