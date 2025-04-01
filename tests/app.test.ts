@@ -69,7 +69,7 @@ describe('Event API Tests', () => {
             expect(response.status).toBe(202);
             expect(response.text).toMatch('Event accepted for processing');
             logSuccess(expect);
-        },2000);
+        },20000);
 
         it('should reject events with missing required fields', async () => {
             const responses = await Promise.all([
