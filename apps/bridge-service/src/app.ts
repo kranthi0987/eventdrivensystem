@@ -58,3 +58,4 @@ app.get('/health', (req, res) => {
 app.listen(3001, () => {
     console.log('Bridge service running on port 3001');
 });
+export default app;

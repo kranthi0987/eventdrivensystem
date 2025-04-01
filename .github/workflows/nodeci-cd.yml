@@ -14,7 +14,7 @@ env:
   ZIP_FILE_NAME: deployment-package.zip
 
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
