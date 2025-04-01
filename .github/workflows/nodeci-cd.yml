@@ -59,7 +59,7 @@ jobs:
           
       - name: Generate deployment package
         run: |
-          zip -r deployment-package.zip . -x "*.git*" "node_modules/*" "tests/*" "*.env*"
+          zip -r deploy.zip . -x "*.git*" "node_modules/*" "tests/*" "*.env*"
           
       - name: Deploy to Elastic Beanstalk
         uses: einaregilsson/beanstalk-deploy@v21
@@ -70,6 +70,7 @@ jobs:
           environment_name: ${{ env.EB_ENVIRONMENT_NAME }}
           region: ${{ env.AWS_REGION }}
           deployment_package: deploy.zip
+          version_label: "app-$(date +%Y%m%d%H%M%S)-${GITHUB_SHA:0:7}"
           wait_for_deployment: true
 
   deploy-infrastructure:
