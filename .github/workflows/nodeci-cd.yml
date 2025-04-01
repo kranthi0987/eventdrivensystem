@@ -57,36 +57,61 @@ jobs:
 
       - name: Verify/Create EB Application
         run: |
-          # Check if application exists
+          echo "Checking if application exists..."
+          # First, list all applications to see what's available
+          aws elasticbeanstalk describe-applications --region ${{ env.AWS_REGION }} --output json
+          
+          # Check if our specific application exists
           if ! aws elasticbeanstalk describe-applications \
             --application-names ${{ env.EB_APPLICATION_NAME }} \
             --region ${{ env.AWS_REGION }} &> /dev/null; then
           
-            echo "Creating EB application..."
-            aws elasticbeanstalk create-application \
+            echo "Creating EB application '${{ env.EB_APPLICATION_NAME }}'..."
+            # Create the application and capture the output
+            CREATE_OUTPUT=$(aws elasticbeanstalk create-application \
               --application-name ${{ env.EB_APPLICATION_NAME }} \
               --description "Event Driven System" \
-              --region ${{ env.AWS_REGION }}
-          
+              --region ${{ env.AWS_REGION }} 2>&1)
+            
+            if [ $? -ne 0 ]; then
+              echo "Error creating application: $CREATE_OUTPUT"
+              exit 1
+            fi
+            
+            echo "Application creation initiated. Waiting for it to be ready..."
             # Wait for application to be ready
-            echo "Waiting for application to be ready..."
             while true; do
               STATUS=$(aws elasticbeanstalk describe-applications \
                 --application-names ${{ env.EB_APPLICATION_NAME }} \
                 --region ${{ env.AWS_REGION }} \
                 --query 'Applications[0].Status' \
-                --output text)
+                --output text 2>/dev/null)
               
               if [ "$STATUS" = "Ready" ]; then
                 echo "Application is ready!"
                 break
               fi
               
+              if [ "$STATUS" = "" ]; then
+                echo "Application status not found. Checking if it exists..."
+                aws elasticbeanstalk describe-applications \
+                  --application-names ${{ env.EB_APPLICATION_NAME }} \
+                  --region ${{ env.AWS_REGION }}
+                exit 1
+              fi
+              
               echo "Application status: $STATUS. Waiting..."
               sleep 10
             done
           else
-            echo "Application already exists"
+            echo "Application '${{ env.EB_APPLICATION_NAME }}' already exists"
+            # Verify the application is actually ready
+            STATUS=$(aws elasticbeanstalk describe-applications \
+              --application-names ${{ env.EB_APPLICATION_NAME }} \
+              --region ${{ env.AWS_REGION }} \
+              --query 'Applications[0].Status' \
+              --output text)
+            echo "Existing application status: $STATUS"
           fi
 
       - name: Verify/Create EB Environment
