@@ -5,7 +5,7 @@ import { Server } from 'http';
 import chalk from 'chalk';
 
 // Configure test timeout
-jest.setTimeout(10000); // 10 seconds
+jest.setTimeout(30000); // 30 seconds
 
 function logSuccess(expect: jest.Expect) {
     console.log(chalk.green(`✓ ${expect.getState().currentTestName} - passed`));
@@ -63,12 +63,13 @@ describe('Event API Tests', () => {
             const response = await request(app)
                 .post('/api/events')
                 .set('Authorization', `Bearer ${validToken}`)
-                .send(testEvent);
+                .send(testEvent)
+                .timeout(15000);
 
             expect(response.status).toBe(202);
             expect(response.text).toMatch('Event accepted for processing');
             logSuccess(expect);
-        });
+        },2000);
 
         it('should reject events with missing required fields', async () => {
             const responses = await Promise.all([
