@@ -1,6 +1,6 @@
 import Queue from 'bull';
 import { GraphQLClient } from 'graphql-request';
-import { SourceEvent, EnhancedEvent } from './types';
+import { SourceEvent } from './types';
 import { enhanceEvent } from './utils';
 import {jwtConfig, JWTService} from "shared-auth";
 

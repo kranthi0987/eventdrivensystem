@@ -31,13 +31,13 @@ async function startServer() {
                 const payload = jwtService.verifyToken(token);
                 return { user: payload };
             } catch (err) {
-                throw new Error('Invalid or expired token');
+                throw new Error('Invalid or expired token'+err);
             }
         }
     });
 
     await server.start();
-
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     server.applyMiddleware({ app: app as any });
 
     app.get('/health', (req, res) => {

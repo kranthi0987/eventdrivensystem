@@ -19,5 +19,5 @@ module.exports = {
     rules: {
         // Your custom rules
     },
-    ignorePatterns: ['dist/**', 'node_modules/**']
+    ignorePatterns: ['dist/**', 'node_modules/**' , 'tests/**']
 };

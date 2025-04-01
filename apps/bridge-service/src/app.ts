@@ -19,7 +19,7 @@ function authenticateJWT(req: express.Request, res: express.Response, next: expr
         }
         next();
     } catch (err) {
-        return res.status(401).send('Invalid or expired token');
+        return res.status(401).send('Invalid or expired token'+err);
     }
 }
 

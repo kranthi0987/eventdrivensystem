@@ -1,4 +1,4 @@
-import jwt, { SignOptions, VerifyOptions } from 'jsonwebtoken';
+import jwt, {  VerifyOptions } from 'jsonwebtoken';
 import { JWTConfig, AuthPayload } from './types';
 
 export class JWTService {
