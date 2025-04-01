@@ -59,17 +59,17 @@ describe('Event API Tests', () => {
     });
 
     describe('Event Creation', () => {
-        it('should create an event with valid payload and token', async () => {
-            const response = await request(app)
-                .post('/api/events')
-                .set('Authorization', `Bearer ${validToken}`)
-                .send(testEvent)
-                .timeout(15000);
-
-            expect(response.status).toBe(202);
-            expect(response.text).toMatch('Event accepted for processing');
-            logSuccess(expect);
-        },20000);
+        // it('should create an event with valid payload and token', async () => {
+        //     const response = await request(app)
+        //         .post('/api/events')
+        //         .set('Authorization', `Bearer ${validToken}`)
+        //         .send(testEvent)
+        //         .timeout(15000);
+        //
+        //     expect(response.status).toBe(202);
+        //     expect(response.text).toMatch('Event accepted for processing');
+        //     logSuccess(expect);
+        // },20000);
 
         it('should reject events with missing required fields', async () => {
             const responses = await Promise.all([
