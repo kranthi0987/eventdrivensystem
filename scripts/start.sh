@@ -23,4 +23,4 @@ ROOT_DIR="$SCRIPT_DIR/.."
 # Wait for all background processes to complete
 wait
 
-echo "All services started"
+echo "✅ All services started"

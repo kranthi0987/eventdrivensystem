@@ -3,8 +3,6 @@ import { ApolloServer } from 'apollo-server-express';
 import { typeDefs, resolvers } from './schema';
 import {jwtConfig, JWTService} from "shared-auth";
 
-
-
 const jwtService = new JWTService(jwtConfig);
 
 const app = express();
@@ -39,6 +37,8 @@ async function startServer() {
     });
 
     await server.start();
+
+    server.applyMiddleware({ app: app as any });
 
     app.get('/health', (req, res) => {
         res.status(200).send('OK');

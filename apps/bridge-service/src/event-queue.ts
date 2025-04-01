@@ -6,7 +6,7 @@ import {jwtConfig, JWTService} from "shared-auth";
 
 
 
-const TARGET_API_URL = 'http://localhost:4000/graphql';
+const TARGET_API_URL = 'http://localhost:3002/graphql';
 const jwtService = new JWTService(jwtConfig);
 
 const client = new GraphQLClient(TARGET_API_URL, {
@@ -48,7 +48,12 @@ eventQueue.process(async (job) => {
         console.log(`Event ${event.id} successfully processed by target API`);
         return data;
     } catch (error) {
-        console.error(`Error processing event ${event.id}:`, error instanceof Error ? error.message : 'Unknown error');
+        console.error(`Error processing event ${event.id}:`, {
+            error: error instanceof Error ? error.message : 'Unknown error',
+            stack: error instanceof Error ? error.stack : undefined,
+            eventId: event.id,
+            timestamp: new Date().toISOString()
+        });
         throw error;
     }
 });

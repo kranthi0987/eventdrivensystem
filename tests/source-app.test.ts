@@ -158,7 +158,7 @@ describe('Source App Tests', () => {
                 timestamp: new Date().toISOString()
             };
 
-            let eventCount = 0;
+            let eventCount = 5;
             const TOTAL_EVENTS = 50;
 
             mockApp.generateEvent.mockReturnValue(mockEvent);

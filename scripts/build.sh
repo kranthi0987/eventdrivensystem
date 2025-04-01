@@ -12,3 +12,5 @@ for app in apps/*; do
         cd ../..
     fi
 done
+
+echo "✅ Build completed successfully!"
