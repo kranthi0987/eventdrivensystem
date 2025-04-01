@@ -57,20 +57,74 @@ jobs:
 
       - name: Verify/Create EB Application
         run: |
-            # Check if application exists
-            if ! aws elasticbeanstalk describe-applications \
-              --application-names ${{ env.EB_APPLICATION_NAME }} \
-              --region ${{ env.AWS_REGION }} &> /dev/null; then
-            
-              echo "Creating EB application..."
-              aws elasticbeanstalk create-application \
-                --application-name ${{ env.EB_APPLICATION_NAME }} \
-                --description "Event Driven System" \
-                --region ${{ env.AWS_REGION }}
-            
-              # Wait for application to be ready
+          # Check if application exists
+          if ! aws elasticbeanstalk describe-applications \
+            --application-names ${{ env.EB_APPLICATION_NAME }} \
+            --region ${{ env.AWS_REGION }} &> /dev/null; then
+          
+            echo "Creating EB application..."
+            aws elasticbeanstalk create-application \
+              --application-name ${{ env.EB_APPLICATION_NAME }} \
+              --description "Event Driven System" \
+              --region ${{ env.AWS_REGION }}
+          
+            # Wait for application to be ready
+            echo "Waiting for application to be ready..."
+            while true; do
+              STATUS=$(aws elasticbeanstalk describe-applications \
+                --application-names ${{ env.EB_APPLICATION_NAME }} \
+                --region ${{ env.AWS_REGION }} \
+                --query 'Applications[0].Status' \
+                --output text)
+              
+              if [ "$STATUS" = "Ready" ]; then
+                echo "Application is ready!"
+                break
+              fi
+              
+              echo "Application status: $STATUS. Waiting..."
               sleep 10
-            fi
+            done
+          else
+            echo "Application already exists"
+          fi
+
+      - name: Verify/Create EB Environment
+        run: |
+          # Check if environment exists
+          if ! aws elasticbeanstalk describe-environments \
+            --environment-names ${{ env.EB_ENVIRONMENT_NAME }} \
+            --application-name ${{ env.EB_APPLICATION_NAME }} \
+            --region ${{ env.AWS_REGION }} &> /dev/null; then
+          
+            echo "Creating EB environment..."
+            aws elasticbeanstalk create-environment \
+              --application-name ${{ env.EB_APPLICATION_NAME }} \
+              --environment-name ${{ env.EB_ENVIRONMENT_NAME }} \
+              --solution-stack-name "64bit Amazon Linux 2023 v6.0.0 running Node.js 22" \
+              --region ${{ env.AWS_REGION }}
+          
+            # Wait for environment to be ready
+            echo "Waiting for environment to be ready..."
+            while true; do
+              STATUS=$(aws elasticbeanstalk describe-environments \
+                --environment-names ${{ env.EB_ENVIRONMENT_NAME }} \
+                --application-name ${{ env.EB_APPLICATION_NAME }} \
+                --region ${{ env.AWS_REGION }} \
+                --query 'Environments[0].Status' \
+                --output text)
+              
+              if [ "$STATUS" = "Ready" ]; then
+                echo "Environment is ready!"
+                break
+              fi
+              
+              echo "Environment status: $STATUS. Waiting..."
+              sleep 30
+            done
+          else
+            echo "Environment already exists"
+          fi
 
   deploy:
     needs: create-eb-app
