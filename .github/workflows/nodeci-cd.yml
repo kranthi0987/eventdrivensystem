@@ -67,7 +67,7 @@ jobs:
           fi
 
   deploy:
-    needs: build-zip
+    needs: [build-zip, create-eb-app]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     
