@@ -57,6 +57,80 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Create Elastic Beanstalk Service Role if needed
+        run: |
+            if ! aws iam get-role --role-name aws-elasticbeanstalk-service-role &> /dev/null; then
+            aws iam create-role \
+             --role-name aws-elasticbeanstalk-service-role \
+             --assume-role-policy-document '{
+               "Version": "2012-10-17",
+               "Statement": [
+                 {
+                   "Effect": "Allow",
+                   "Principal": {
+                     "Service": "elasticbeanstalk.amazonaws.com"
+                   },
+                   "Action": "sts:AssumeRole",
+                   "Condition": {
+                     "StringEquals": {
+                       "sts:ExternalId": "elasticbeanstalk"
+                     }
+                   }
+                 }
+               ]
+             }'
+            
+            aws iam attach-role-policy \
+             --role-name aws-elasticbeanstalk-service-role \
+             --policy-arn arn:aws:iam::aws:policy/service-role/AWSElasticBeanstalkEnhancedHealth
+            
+            aws iam attach-role-policy \
+             --role-name aws-elasticbeanstalk-service-role \
+             --policy-arn arn:aws:iam::aws:policy/service-role/AWSElasticBeanstalkService
+            fi
+
+            - name: Create EC2 Instance Profile if needed
+              run: |
+                if ! aws iam get-instance-profile --instance-profile-name aws-elasticbeanstalk-ec2-role &> /dev/null; then
+                  # Create the role
+                  aws iam create-role \
+                    --role-name aws-elasticbeanstalk-ec2-role \
+                    --assume-role-policy-document '{
+                      "Version": "2012-10-17",
+                      "Statement": [
+                        {
+                          "Effect": "Allow",
+                          "Principal": {
+                            "Service": "ec2.amazonaws.com"
+                          },
+                          "Action": "sts:AssumeRole"
+                        }
+                      ]
+                    }'
+                
+                  # Attach policies
+                  aws iam attach-role-policy \
+                    --role-name aws-elasticbeanstalk-ec2-role \
+                    --policy-arn arn:aws:iam::aws:policy/AWSElasticBeanstalkWebTier
+                
+                  aws iam attach-role-policy \
+                    --role-name aws-elasticbeanstalk-ec2-role \
+                    --policy-arn arn:aws:iam::aws:policy/AWSElasticBeanstalkWorkerTier
+                
+                  aws iam attach-role-policy \
+                    --role-name aws-elasticbeanstalk-ec2-role \
+                    --policy-arn arn:aws:iam::aws:policy/AWSElasticBeanstalkMulticontainerDocker
+                
+                  # Create instance profile
+                  aws iam create-instance-profile \
+                    --instance-profile-name aws-elasticbeanstalk-ec2-role
+                
+                  # Add role to instance profile
+                  aws iam add-role-to-instance-profile \
+                    --instance-profile-name aws-elasticbeanstalk-ec2-role \
+                    --role-name aws-elasticbeanstalk-ec2-role
+                fi
+
       - name: Verify/Create EB Application
         run: |
           echo "Checking if application exists..."
@@ -141,52 +215,8 @@ jobs:
           else
             echo "Environment '${{ env.EB_ENVIRONMENT_NAME }}' already exists"
           fi
-  setup-eb:
-    needs: create-eb-app
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Create EB Application if not exists
-        run: |
-          if ! aws elasticbeanstalk describe-applications \
-            --application-name ${{ env.EB_APPLICATION_NAME }} \
-            --region ${{ env.AWS_REGION }} &> /dev/null; then
-            aws elasticbeanstalk create-application \
-              --application-name ${{ env.EB_APPLICATION_NAME }} \
-              --region ${{ env.AWS_REGION }}
-          fi
-
-      - name: Create EB Environment if not exists
-        run: |
-          if ! aws elasticbeanstalk describe-environments \
-            --environment-names ${{ env.EB_ENVIRONMENT_NAME }} \
-            --region ${{ env.AWS_REGION }} &> /dev/null; then
-
-            echo "Creating environment..."
-            aws elasticbeanstalk create-environment \
-              --application-name ${{ env.EB_APPLICATION_NAME }} \
-              --environment-name ${{ env.EB_ENVIRONMENT_NAME }} \
-              --solution-stack-name "${{ env.SOLUTION_STACK }}" \
-              --option-settings "[
-                {\"Namespace\":\"aws:autoscaling:launchconfiguration\",\"OptionName\":\"InstanceType\",\"Value\":\"${{ env.INSTANCE_TYPE }}\"},
-                {\"Namespace\":\"aws:elasticbeanstalk:environment\",\"OptionName\":\"EnvironmentType\",\"Value\":\"SingleInstance\"}
-              ]" \
-              --region ${{ env.AWS_REGION }}
-
-            echo "Waiting for environment to be ready..."
-            aws elasticbeanstalk wait environment-ready \
-              --environment-name ${{ env.EB_ENVIRONMENT_NAME }} \
-              --region ${{ env.AWS_REGION }}
-          fi
   deploy:
-    needs: setup-eb
+    needs: create-eb-app
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
 
@@ -199,6 +229,13 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
+      - name: Verify Environment Status
+        run: |
+            aws elasticbeanstalk describe-environments \
+              --environment-names ${{ env.EB_ENVIRONMENT_NAME }} \
+              --region ${{ env.AWS_REGION }} \
+              --query 'Environments[0].{Status:Status, Health:Health}' \
+              --output table
 
       - name: Generate unique version label
         id: version
