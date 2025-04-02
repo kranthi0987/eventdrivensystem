@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import eventQueue from './event-queue';
 import { SourceEvent } from './types';
 import { JWTService, jwtConfig } from 'shared-auth';
@@ -24,6 +25,15 @@ function authenticateJWT(req: express.Request, res: express.Response, next: expr
 }
 
 const app = express();
+
+// Enable CORS for all routes
+app.use(cors({
+    origin: 'http://localhost:5173', // Allow requests from the event-monitor application
+    methods: ['GET', 'POST'], // Allow specific HTTP methods
+    allowedHeaders: ['Content-Type', 'Authorization'], // Allow specific headers
+    credentials: true // Allow credentials (cookies, authorization headers, etc.)
+}));
+
 app.use(express.json());
 
 // Apply JWT authentication to all routes except health check
@@ -34,6 +44,33 @@ app.use((req, res, next) => {
     authenticateJWT(req, res, next);
 });
 
+/**
+ * @swagger
+ * /api/events:
+ *   post:
+ *     summary: Create a new event
+ *     description: Accepts an event and queues it for processing
+ *     tags: [Events]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/Event'
+ *     responses:
+ *       202:
+ *         description: Event accepted for processing
+ *       400:
+ *         description: Invalid event format
+ *       401:
+ *         description: Unauthorized - Missing or invalid JWT token
+ *       403:
+ *         description: Forbidden - Invalid service token
+ *       500:
+ *         description: Internal server error
+ */
 app.post('/api/events', (req, res) => {
     const event = req.body as SourceEvent;
 
@@ -51,6 +88,17 @@ app.post('/api/events', (req, res) => {
         });
 });
 
+/**
+ * @swagger
+ * /health:
+ *   get:
+ *     summary: Health check endpoint
+ *     description: Returns OK if the service is running
+ *     tags: [System]
+ *     responses:
+ *       200:
+ *         description: Service is healthy
+ */
 app.get('/health', (req, res) => {
     res.status(200).send('OK');
 });

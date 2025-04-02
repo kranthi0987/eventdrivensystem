@@ -1,6 +1,36 @@
 import { gql } from 'apollo-server-express';
 import { Event, EventInput } from './types';
 
+/**
+ * @swagger
+ * /graphql:
+ *   post:
+ *     summary: GraphQL API endpoint
+ *     description: GraphQL API for event management
+ *     tags: [GraphQL]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               query:
+ *                 type: string
+ *                 description: GraphQL query string
+ *               variables:
+ *                 type: object
+ *                 description: Query variables
+ *     responses:
+ *       200:
+ *         description: Successful GraphQL response
+ *       401:
+ *         description: Unauthorized - Missing or invalid JWT token
+ *       403:
+ *         description: Forbidden - Invalid service token
+ */
 export const typeDefs = gql`
   type Event {
     id: ID!

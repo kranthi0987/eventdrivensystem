@@ -68,6 +68,17 @@ export function simulateEvents(): void {
     }, EVENT_INTERVAL);
 }
 
+/**
+ * @swagger
+ * /health:
+ *   get:
+ *     summary: Health check endpoint
+ *     description: Returns OK if the service is running
+ *     tags: [System]
+ *     responses:
+ *       200:
+ *         description: Service is healthy
+ */
 app.get('/health', (req, res) => {
     res.status(200).send('OK');
 });
