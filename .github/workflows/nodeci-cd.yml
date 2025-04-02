@@ -58,71 +58,47 @@ jobs:
       - name: Verify/Create EB Application
         run: |
           echo "Checking if application exists..."
-          # First, list all applications to see what's available
-          aws elasticbeanstalk describe-applications --region ${{ env.AWS_REGION }} --output json
+          # List all applications and check if ours exists
+          APP_EXISTS=$(aws elasticbeanstalk describe-applications \
+            --region ${{ env.AWS_REGION }} \
+            --query "Applications[?ApplicationName=='${{ env.EB_APPLICATION_NAME }}'].ApplicationName" \
+            --output text)
           
-          # Check if our specific application exists
-          if ! aws elasticbeanstalk describe-applications \
-            --application-names ${{ env.EB_APPLICATION_NAME }} \
-            --region ${{ env.AWS_REGION }} &> /dev/null; then
-          
+          if [ -z "$APP_EXISTS" ]; then
             echo "Creating EB application '${{ env.EB_APPLICATION_NAME }}'..."
-            # Create the application and capture the output
-            CREATE_OUTPUT=$(aws elasticbeanstalk create-application \
+            aws elasticbeanstalk create-application \
               --application-name ${{ env.EB_APPLICATION_NAME }} \
               --description "Event Driven System" \
-              --region ${{ env.AWS_REGION }} 2>&1)
+              --region ${{ env.AWS_REGION }}
             
-            if [ $? -ne 0 ]; then
-              echo "Error creating application: $CREATE_OUTPUT"
+            # Verify application was created
+            sleep 10
+            APP_EXISTS=$(aws elasticbeanstalk describe-applications \
+              --region ${{ env.AWS_REGION }} \
+              --query "Applications[?ApplicationName=='${{ env.EB_APPLICATION_NAME }}'].ApplicationName" \
+              --output text)
+            
+            if [ -z "$APP_EXISTS" ]; then
+              echo "Failed to create application!"
               exit 1
             fi
-            
-            echo "Application creation initiated. Waiting for it to be ready..."
-            # Wait for application to be ready
-            while true; do
-              STATUS=$(aws elasticbeanstalk describe-applications \
-                --application-names ${{ env.EB_APPLICATION_NAME }} \
-                --region ${{ env.AWS_REGION }} \
-                --query 'Applications[0].Status' \
-                --output text 2>/dev/null)
-              
-              if [ "$STATUS" = "Ready" ]; then
-                echo "Application is ready!"
-                break
-              fi
-              
-              if [ "$STATUS" = "" ]; then
-                echo "Application status not found. Checking if it exists..."
-                aws elasticbeanstalk describe-applications \
-                  --application-names ${{ env.EB_APPLICATION_NAME }} \
-                  --region ${{ env.AWS_REGION }}
-                exit 1
-              fi
-              
-              echo "Application status: $STATUS. Waiting..."
-              sleep 10
-            done
+            echo "Application created successfully!"
           else
             echo "Application '${{ env.EB_APPLICATION_NAME }}' already exists"
-            # Verify the application is actually ready
-            STATUS=$(aws elasticbeanstalk describe-applications \
-              --application-names ${{ env.EB_APPLICATION_NAME }} \
-              --region ${{ env.AWS_REGION }} \
-              --query 'Applications[0].Status' \
-              --output text)
-            echo "Existing application status: $STATUS"
           fi
 
       - name: Verify/Create EB Environment
         run: |
-          # Check if environment exists
-          if ! aws elasticbeanstalk describe-environments \
-            --environment-names ${{ env.EB_ENVIRONMENT_NAME }} \
+          echo "Checking if environment exists..."
+          ENV_EXISTS=$(aws elasticbeanstalk describe-environments \
             --application-name ${{ env.EB_APPLICATION_NAME }} \
-            --region ${{ env.AWS_REGION }} &> /dev/null; then
+            --environment-names ${{ env.EB_ENVIRONMENT_NAME }} \
+            --region ${{ env.AWS_REGION }} \
+            --query "Environments[?EnvironmentName=='${{ env.EB_ENVIRONMENT_NAME }}'].EnvironmentName" \
+            --output text)
           
-            echo "Creating EB environment..."
+          if [ -z "$ENV_EXISTS" ]; then
+            echo "Creating EB environment '${{ env.EB_ENVIRONMENT_NAME }}'..."
             aws elasticbeanstalk create-environment \
               --application-name ${{ env.EB_APPLICATION_NAME }} \
               --environment-name ${{ env.EB_ENVIRONMENT_NAME }} \
@@ -142,13 +118,16 @@ jobs:
               if [ "$STATUS" = "Ready" ]; then
                 echo "Environment is ready!"
                 break
+              elif [ "$STATUS" = "Terminated" ] || [ "$STATUS" = "Terminating" ]; then
+                echo "Environment is in $STATUS state. Deployment failed."
+                exit 1
               fi
               
               echo "Environment status: $STATUS. Waiting..."
               sleep 30
             done
           else
-            echo "Environment already exists"
+            echo "Environment '${{ env.EB_ENVIRONMENT_NAME }}' already exists"
           fi
 
   deploy:
@@ -179,10 +158,10 @@ jobs:
       - name: Generate unique version label
         id: version
         run: |
-            TIMESTAMP=$(date +%Y%m%d%H%M%S)
-            SHORT_SHA=${GITHUB_SHA:0:7}
-            UNIQUE_SUFFIX=$(echo $RANDOM | md5sum | head -c 4)
-            echo "version=app-$TIMESTAMP-$SHORT_SHA-$UNIQUE_SUFFIX" >> $GITHUB_OUTPUT
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
+          SHORT_SHA=${GITHUB_SHA:0:7}
+          UNIQUE_SUFFIX=$(echo $RANDOM | md5sum | head -c 4)
+          echo "version=app-$TIMESTAMP-$SHORT_SHA-$UNIQUE_SUFFIX" >> $GITHUB_OUTPUT
 
       - name: Generate deployment package
         run: |
