@@ -96,36 +96,22 @@ jobs:
             --region ${{ env.AWS_REGION }} \
             --query "Environments[?EnvironmentName=='${{ env.EB_ENVIRONMENT_NAME }}'].EnvironmentName" \
             --output text)
-          
+
           if [ -z "$ENV_EXISTS" ]; then
             echo "Creating EB environment '${{ env.EB_ENVIRONMENT_NAME }}' with stack '${{ env.SOLUTION_STACK }}'..."
-          
-            # Create configuration file with proper EOF handling
-            cat << 'EOF' > eb-config.json
-            [
-              {
-                "Namespace": "aws:autoscaling:launchconfiguration",
-                "OptionName": "InstanceType",
-                "Value": "$INSTANCE_TYPE"
-              },
-              {
-                "Namespace": "aws:elasticbeanstalk:environment",
-                "OptionName": "EnvironmentType",
-                "Value": "SingleInstance"
-              }
-            ]
-            EOF
-          
-            # Replace placeholder with actual value
-            sed -i "s/\$INSTANCE_TYPE/${{ env.INSTANCE_TYPE }}/g" eb-config.json
-          
+
+            # Create configuration directly in the command
             aws elasticbeanstalk create-environment \
               --application-name ${{ env.EB_APPLICATION_NAME }} \
               --environment-name ${{ env.EB_ENVIRONMENT_NAME }} \
               --solution-stack-name "${{ env.SOLUTION_STACK }}" \
-              --option-settings file://eb-config.json \
+              --option-settings \
+                "[
+                  {\"Namespace\":\"aws:autoscaling:launchconfiguration\",\"OptionName\":\"InstanceType\",\"Value\":\"${{ env.INSTANCE_TYPE }}\"},
+                  {\"Namespace\":\"aws:elasticbeanstalk:environment\",\"OptionName\":\"EnvironmentType\",\"Value\":\"SingleInstance\"}
+                ]" \
               --region ${{ env.AWS_REGION }}
-          
+
             echo "Waiting for environment to be ready..."
             while true; do
               STATUS=$(aws elasticbeanstalk describe-environments \
@@ -134,7 +120,7 @@ jobs:
                 --region ${{ env.AWS_REGION }} \
                 --query 'Environments[0].Status' \
                 --output text)
-          
+
               if [ "$STATUS" = "Ready" ]; then
                 echo "Environment is ready!"
                 break
@@ -148,7 +134,7 @@ jobs:
                   --output table
                 exit 1
               fi
-          
+
               echo "Environment status: $STATUS. Waiting..."
               sleep 30
             done
