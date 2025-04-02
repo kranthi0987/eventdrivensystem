@@ -100,13 +100,13 @@ jobs:
           if [ -z "$ENV_EXISTS" ]; then
             echo "Creating EB environment '${{ env.EB_ENVIRONMENT_NAME }}' with stack '${{ env.SOLUTION_STACK }}'..."
           
-            # Create configuration file
-            cat > eb-config.json << EOF
+            # Create configuration file with proper EOF handling
+            cat << 'EOF' > eb-config.json
             [
               {
                 "Namespace": "aws:autoscaling:launchconfiguration",
                 "OptionName": "InstanceType",
-                "Value": "${{ env.INSTANCE_TYPE }}"
+                "Value": "$INSTANCE_TYPE"
               },
               {
                 "Namespace": "aws:elasticbeanstalk:environment",
@@ -115,6 +115,9 @@ jobs:
               }
             ]
             EOF
+          
+            # Replace placeholder with actual value
+            sed -i "s/\$INSTANCE_TYPE/${{ env.INSTANCE_TYPE }}/g" eb-config.json
           
             aws elasticbeanstalk create-environment \
               --application-name ${{ env.EB_APPLICATION_NAME }} \
@@ -152,7 +155,6 @@ jobs:
           else
             echo "Environment '${{ env.EB_ENVIRONMENT_NAME }}' already exists"
           fi
-
   deploy:
     needs: create-eb-app
     runs-on: ubuntu-latest
