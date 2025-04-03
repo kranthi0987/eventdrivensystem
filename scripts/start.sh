@@ -19,6 +19,10 @@ ROOT_DIR="$SCRIPT_DIR/.."
   cd "$ROOT_DIR/apps/target-app" || { echo "Failed to cd to target-app"; exit 1; }
   npm start
 ) &
+(
+  cd "$ROOT_DIR/apps/event-monitor" || { echo "Failed to cd to target-app"; exit 1; }
+  npm start
+)
 
 # Wait for all background processes to complete
 wait

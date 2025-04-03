@@ -129,4 +129,23 @@ variable "ecr_repository" {
   description = "ECR repository name"
   type        = string
   default     = "eventdrivensystem"
+}
+
+# Frontend Configuration
+variable "frontend_bucket_name" {
+  description = "Name of the S3 bucket for frontend hosting"
+  type        = string
+  default     = "event-monitor-frontend"
+}
+
+variable "frontend_domain_name" {
+  description = "Domain name for the frontend application"
+  type        = string
+  default     = "monitor.yourdomain.com"
+}
+
+variable "frontend_certificate_arn" {
+  description = "ARN of the ACM certificate for the frontend domain"
+  type        = string
+  default     = ""
 } 

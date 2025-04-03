@@ -14,9 +14,11 @@ env:
   ZIP_FILE_NAME: deploy.zip
   SOLUTION_STACK: "64bit Amazon Linux 2023 v6.5.0 running Node.js 22"
   INSTANCE_TYPE: "t3.micro"
+  FRONTEND_APP_NAME: event-monitor
+  S3_BUCKET_NAME: event-monitor-frontend
 
 jobs:
-  build-zip:
+  build-backend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,7 +35,7 @@ jobs:
       - name: Run linting
         run: npm run lint
 
-      - name: Build application (if needed)
+      - name: Build application
         run: npm run build --if-present
 
       - name: Run tests
@@ -41,10 +43,45 @@ jobs:
 
       - name: Zip deployment package
         run: |
-          zip -r $ZIP_FILE_NAME . -x *.git* node_modules/* *.github/* *.idea/* *.DS_Store
+          zip -r $ZIP_FILE_NAME . -x *.git* node_modules/* *.github/* *.idea/* *.DS_Store apps/$FRONTEND_APP_NAME/*
+
+  build-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        working-directory: apps/$FRONTEND_APP_NAME
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: apps/$FRONTEND_APP_NAME
+        run: npm run build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to S3
+        run: |
+          aws s3 sync apps/$FRONTEND_APP_NAME/dist s3://$S3_BUCKET_NAME --delete
+          aws s3 cp apps/$FRONTEND_APP_NAME/dist/index.html s3://$S3_BUCKET_NAME/index.html --cache-control "no-cache,no-store,must-revalidate"
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} --paths "/*"
 
   create-eb-app:
-    needs: build-zip
+    needs: build-backend
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
@@ -56,6 +93,7 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
+
       - name: Create Elastic Beanstalk Service Role if needed
         run: |
           if ! aws iam get-role --role-name aws-elasticbeanstalk-service-role &> /dev/null; then
@@ -88,47 +126,48 @@ jobs:
               --policy-arn arn:aws:iam::aws:policy/service-role/AWSElasticBeanstalkService
           fi
 
-      - name: Create EC2 Instance Profile if needed
+      - name: Create EC2 Instance Profile and Role
         run: |
-          if ! aws iam get-instance-profile --instance-profile-name aws-elasticbeanstalk-ec2-role &> /dev/null; then
-            # Create the role
-            aws iam create-role \
-              --role-name aws-elasticbeanstalk-ec2-role \
-              --assume-role-policy-document '{
-                "Version": "2012-10-17",
-                "Statement": [
-                  {
-                    "Effect": "Allow",
-                    "Principal": {
-                      "Service": "ec2.amazonaws.com"
-                    },
-                    "Action": "sts:AssumeRole"
-                  }
-                ]
-              }'
+          # Create the role
+          aws iam create-role \
+            --role-name aws-elasticbeanstalk-ec2-role \
+            --assume-role-policy-document '{
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Principal": {
+                    "Service": "ec2.amazonaws.com"
+                  },
+                  "Action": "sts:AssumeRole"
+                }
+              ]
+            }' || true
 
-            # Attach policies
-            aws iam attach-role-policy \
-              --role-name aws-elasticbeanstalk-ec2-role \
-              --policy-arn arn:aws:iam::aws:policy/AWSElasticBeanstalkWebTier
+          # Attach policies
+          aws iam attach-role-policy \
+            --role-name aws-elasticbeanstalk-ec2-role \
+            --policy-arn arn:aws:iam::aws:policy/AWSElasticBeanstalkWebTier || true
 
-            aws iam attach-role-policy \
-              --role-name aws-elasticbeanstalk-ec2-role \
-              --policy-arn arn:aws:iam::aws:policy/AWSElasticBeanstalkWorkerTier
+          aws iam attach-role-policy \
+            --role-name aws-elasticbeanstalk-ec2-role \
+            --policy-arn arn:aws:iam::aws:policy/AWSElasticBeanstalkWorkerTier || true
 
-            aws iam attach-role-policy \
-              --role-name aws-elasticbeanstalk-ec2-role \
-              --policy-arn arn:aws:iam::aws:policy/AWSElasticBeanstalkMulticontainerDocker
+          aws iam attach-role-policy \
+            --role-name aws-elasticbeanstalk-ec2-role \
+            --policy-arn arn:aws:iam::aws:policy/AWSElasticBeanstalkMulticontainerDocker || true
 
-            # Create instance profile
-            aws iam create-instance-profile \
-              --instance-profile-name aws-elasticbeanstalk-ec2-role
+          # Create instance profile
+          aws iam create-instance-profile \
+            --instance-profile-name aws-elasticbeanstalk-ec2-role || true
 
-            # Add role to instance profile
-            aws iam add-role-to-instance-profile \
-              --instance-profile-name aws-elasticbeanstalk-ec2-role \
-              --role-name aws-elasticbeanstalk-ec2-role
-          fi
+          # Add role to instance profile
+          aws iam add-role-to-instance-profile \
+            --instance-profile-name aws-elasticbeanstalk-ec2-role \
+            --role-name aws-elasticbeanstalk-ec2-role || true
+
+          # Wait for instance profile to be ready
+          sleep 10
 
       - name: Verify Solution Stack
         run: |
@@ -160,7 +199,8 @@ jobs:
               --option-settings \
                 "[
                   {\"Namespace\":\"aws:autoscaling:launchconfiguration\",\"OptionName\":\"InstanceType\",\"Value\":\"${{ env.INSTANCE_TYPE }}\"},
-                  {\"Namespace\":\"aws:elasticbeanstalk:environment\",\"OptionName\":\"EnvironmentType\",\"Value\":\"SingleInstance\"}
+                  {\"Namespace\":\"aws:elasticbeanstalk:environment\",\"OptionName\":\"EnvironmentType\",\"Value\":\"SingleInstance\"},
+                  {\"Namespace\":\"aws:autoscaling:launchconfiguration\",\"OptionName\":\"IamInstanceProfile\",\"Value\":\"aws-elasticbeanstalk-ec2-role\"}
                 ]" \
               --region ${{ env.AWS_REGION }}
 
@@ -193,6 +233,7 @@ jobs:
           else
             echo "Environment '${{ env.EB_ENVIRONMENT_NAME }}' already exists"
           fi
+
   deploy:
     needs: create-eb-app
     runs-on: ubuntu-latest
@@ -240,7 +281,7 @@ jobs:
           wait_for_deployment: true
 
   deploy-infrastructure:
-    needs: deploy
+    needs: [deploy, build-frontend]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
 
@@ -248,28 +289,25 @@ jobs:
       - uses: actions/checkout@v3
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v2
+        uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.5.0"
 
       - name: Terraform Init
-        run: |
-          cd ${{ env.TERRAFORM_WORKING_DIR }}
-          terraform init
+        working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
+        run: terraform init
 
-      - name: Terraform Validate
-        run: |
-          cd ${{ env.TERRAFORM_WORKING_DIR }}
-          terraform validate
+      - name: Terraform Plan
+        working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
+        run: terraform plan -var="frontend_bucket_name=${{ env.S3_BUCKET_NAME }}"
 
       - name: Terraform Apply
-        run: |
-          cd ${{ env.TERRAFORM_WORKING_DIR }}
-          terraform apply -auto-approve
+        working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
+        run: terraform apply -auto-approve -var="frontend_bucket_name=${{ env.S3_BUCKET_NAME }}"

@@ -16,6 +16,7 @@
     "test": "jest --runInBand --forceExit "
   },
   "dependencies": {
+    "@types/cors": "^2.8.17",
     "apollo-server-express": "^3.12.0",
     "aws-sdk": "^2.1395.0",
     "axios": "^1.6.2",

@@ -50,6 +50,15 @@ module "redis" {
   app_security_group_id = module.elastic_beanstalk.security_group_id
 }
 
+# Frontend Infrastructure
+module "frontend" {
+  source = "./modules/frontend"
+  
+  environment = var.environment
+  bucket_name = var.frontend_bucket_name
+  domain_name = var.frontend_domain_name
+  certificate_arn = var.frontend_certificate_arn
+}
 
 # CI/CD Infrastructure
 # CodeBuild Project
@@ -218,4 +227,38 @@ resource "aws_codestarconnections_connection" "github" {
 }
 
 # Data source for AWS account ID
-data "aws_caller_identity" "current" {} 
+data "aws_caller_identity" "current" {}
+
+# Update CodeBuild IAM role to include S3 and CloudFront permissions
+resource "aws_iam_role_policy" "codebuild_frontend_deploy" {
+  name = "${var.environment}-${var.project_name}-codebuild-frontend-deploy"
+  role = aws_iam_role.codebuild_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:GetObject",
+          "s3:ListBucket",
+          "s3:DeleteObject"
+        ]
+        Resource = [
+          "arn:aws:s3:::${var.frontend_bucket_name}",
+          "arn:aws:s3:::${var.frontend_bucket_name}/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "cloudfront:CreateInvalidation"
+        ]
+        Resource = [
+          module.frontend.cloudfront_distribution_arn
+        ]
+      }
+    ]
+  })
+} 

@@ -26,13 +26,9 @@ function authenticateJWT(req: express.Request, res: express.Response, next: expr
 
 const app = express();
 
-// Enable CORS for all routes
-app.use(cors({
-    origin: 'http://localhost:5173', // Allow requests from the event-monitor application
-    methods: ['GET', 'POST'], // Allow specific HTTP methods
-    allowedHeaders: ['Content-Type', 'Authorization'], // Allow specific headers
-    credentials: true // Allow credentials (cookies, authorization headers, etc.)
-}));
+
+// Handle preflight requests explicitly
+app.options('*', cors());
 
 app.use(express.json());
 
