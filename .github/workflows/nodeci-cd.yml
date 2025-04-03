@@ -17,6 +17,8 @@ env:
   FRONTEND_APP_NAME: event-monitor
   S3_BUCKET_NAME: event-monitor-frontend
   TERRAFORM_STATE_BUCKET: eventdrivensystem-terraform-state
+  ARTIFACT_RETENTION_DAYS: 5
+  DEPLOYMENT_PACKAGE_PATH: deployments
 
 jobs:
   build-backend:
@@ -66,11 +68,31 @@ jobs:
             -x "apps/$FRONTEND_APP_NAME/*" \
             -x "terraform/*"
 
+      - name: Validate deployment package
+        run: |
+          if [ ! -f "${{ env.ZIP_FILE_NAME }}" ]; then
+            echo "Error: Failed to create deployment package"
+            exit 1
+          fi
+          
+          # Check minimum package size (e.g., 1MB)
+          MIN_SIZE=1000000
+          ACTUAL_SIZE=$(stat -f%z "${{ env.ZIP_FILE_NAME }}")
+          if [ "$ACTUAL_SIZE" -lt "$MIN_SIZE" ]; then
+            echo "Error: Deployment package seems too small ($ACTUAL_SIZE bytes)"
+            exit 1
+          fi
+          
+          # List contents for verification
+          unzip -l "${{ env.ZIP_FILE_NAME }}"
+
       - name: Upload deployment artifact
         uses: actions/upload-artifact@v3
         with:
           name: deployment-package
           path: ${{ env.ZIP_FILE_NAME }}
+          retention-days: 5
+          if-no-files-found: error
 
   build-frontend:
     needs: build-backend
@@ -139,12 +161,12 @@ jobs:
             fi
 
   deploy-infrastructure:
-    needs: build-frontend
+    needs: [build-backend, build-frontend]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -152,6 +174,24 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download deployment package
+        uses: actions/download-artifact@v3
+        with:
+          name: deployment-package
+          path: .
+
+      - name: Verify deployment package
+        run: |
+          if [ ! -f "${{ env.ZIP_FILE_NAME }}" ]; then
+            echo "Error: Deployment package not found!"
+            exit 1
+          fi
+          echo "Deployment package size: $(ls -lh ${{ env.ZIP_FILE_NAME }} | awk '{print $5}')"
+
+      - name: Upload to S3
+        run: |
+          aws s3 cp ${{ env.ZIP_FILE_NAME }} s3://${{ env.S3_BUCKET_NAME }}/deployments/${{ env.ZIP_FILE_NAME }}
 
       - name: Create Terraform State Bucket
         run: |
