@@ -73,6 +73,34 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Create S3 Bucket if not exists
+        run: |
+            if ! aws s3 ls "s3://${{ env.S3_BUCKET_NAME }}" 2>&1 | grep -q 'NoSuchBucket'; then
+              aws s3 mb "s3://${{ env.S3_BUCKET_NAME }}" --region ${{ env.AWS_REGION }}
+              aws s3api put-public-access-block \
+                --bucket ${{ env.S3_BUCKET_NAME }} \
+                --public-access-block-configuration "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false"
+            
+              # Configure bucket policy for public read access
+              aws s3api put-bucket-policy \
+                --bucket ${{ env.S3_BUCKET_NAME }} \
+                --policy '{
+                  "Version": "2012-10-17",
+                  "Statement": [
+                    {
+                      "Effect": "Allow",
+                      "Principal": "*",
+                      "Action": "s3:GetObject",
+                      "Resource": "arn:aws:s3:::'${{ env.S3_BUCKET_NAME }}'/*"
+                    }
+                  ]
+                }'
+            
+              # Enable static website hosting
+              aws s3 website "s3://${{ env.S3_BUCKET_NAME }}" \
+                --index-document index.html \
+                --error-document index.html
+            fi
       - name: Deploy to S3
         run: |
           aws s3 sync apps/event-monitor/dist s3://$S3_BUCKET_NAME --delete
@@ -210,11 +238,23 @@ jobs:
                   {\"Namespace\":\"aws:elasticbeanstalk:application:environment\",\"OptionName\":\"CORS_ORIGIN\",\"Value\":\"*\"},
                   {\"Namespace\":\"aws:elasticbeanstalk:environment:proxy:staticfiles\",\"OptionName\":\"/static\",\"Value\":\"/static\"},
                   {\"Namespace\":\"aws:elasticbeanstalk:environment:proxy\",\"OptionName\":\"ProxyServer\",\"Value\":\"nginx\"},
-                  {\"Namespace\":\"aws:elasticbeanstalk:environment:process:default\",\"OptionName\":\"HealthCheckPath\",\"Value\":\"/\"},
+                  {\"Namespace\":\"aws:elasticbeanstalk:environment:process:default\",\"OptionName\":\"HealthCheckPath\",\"Value\":\"/health\"},
                   {\"Namespace\":\"aws:elasticbeanstalk:environment:process:default\",\"OptionName\":\"Port\",\"Value\":\"8080\"},
                   {\"Namespace\":\"aws:elasticbeanstalk:environment:process:default\",\"OptionName\":\"Protocol\",\"Value\":\"HTTP\"},
                   {\"Namespace\":\"aws:elasticbeanstalk:environment:process:default\",\"OptionName\":\"StickinessEnabled\",\"Value\":\"true\"},
-                  {\"Namespace\":\"aws:elasticbeanstalk:environment:process:default\",\"OptionName\":\"StickinessLBCookieDurationSeconds\",\"Value\":\"86400\"}
+                  {\"Namespace\":\"aws:elasticbeanstalk:environment:process:default\",\"OptionName\":\"StickinessLBCookieDurationSeconds\",\"Value\":\"86400\"},
+                  {\"Namespace\":\"aws:elasticbeanstalk:environment:process:default\",\"OptionName\":\"HealthCheckInterval\",\"Value\":\"30\"},
+                  {\"Namespace\":\"aws:elasticbeanstalk:environment:process:default\",\"OptionName\":\"HealthCheckTimeout\",\"Value\":\"10\"},
+                  {\"Namespace\":\"aws:elasticbeanstalk:environment:process:default\",\"OptionName\":\"HealthyThresholdCount\",\"Value\":\"2\"},
+                  {\"Namespace\":\"aws:elasticbeanstalk:environment:process:default\",\"OptionName\":\"UnhealthyThresholdCount\",\"Value\":\"5\"},
+                  {\"Namespace\":\"aws:elasticbeanstalk:environment:proxy\",\"OptionName\":\"ProxyBuffering\",\"Value\":\"off\"},
+                  {\"Namespace\":\"aws:elasticbeanstalk:environment:proxy\",\"OptionName\":\"ProxyBuffers\",\"Value\":\"8 16k\"},
+                  {\"Namespace\":\"aws:elasticbeanstalk:environment:proxy\",\"OptionName\":\"ProxyBufferSize\",\"Value\":\"8k\"},
+                  {\"Namespace\":\"aws:elasticbeanstalk:environment:proxy\",\"OptionName\":\"ProxyBusyBuffersSize\",\"Value\":\"8k\"},
+                  {\"Namespace\":\"aws:elasticbeanstalk:environment:proxy\",\"OptionName\":\"ProxyMaxTempFileSize\",\"Value\":\"0\"},
+                  {\"Namespace\":\"aws:elasticbeanstalk:environment:proxy\",\"OptionName\":\"ProxyConnectTimeout\",\"Value\":\"5\"},
+                  {\"Namespace\":\"aws:elasticbeanstalk:environment:proxy\",\"OptionName\":\"ProxyReadTimeout\",\"Value\":\"60\"},
+                  {\"Namespace\":\"aws:elasticbeanstalk:environment:proxy\",\"OptionName\":\"ProxySendTimeout\",\"Value\":\"60\"}
                 ]" \
               --region ${{ env.AWS_REGION }}
 
@@ -295,6 +335,50 @@ jobs:
           deployment_package: deploy.zip
           version_label: ${{ steps.version.outputs.version }}
           wait_for_deployment: true
+          wait_for_environment_recovery: 600
+          error_on_failure: false
+
+      - name: Check Deployment Status
+        if: always()
+        run: |
+          STATUS=$(aws elasticbeanstalk describe-environments \
+            --environment-names ${{ env.EB_ENVIRONMENT_NAME }} \
+            --region ${{ env.AWS_REGION }} \
+            --query 'Environments[0].Status' \
+            --output text)
+          
+          HEALTH=$(aws elasticbeanstalk describe-environments \
+            --environment-names ${{ env.EB_ENVIRONMENT_NAME }} \
+            --region ${{ env.AWS_REGION }} \
+            --query 'Environments[0].Health' \
+            --output text)
+          
+          echo "Environment Status: $STATUS"
+          echo "Environment Health: $HEALTH"
+          
+          if [ "$STATUS" != "Ready" ] || [ "$HEALTH" != "Green" ]; then
+            echo "Deployment may have issues. Checking logs..."
+            aws elasticbeanstalk retrieve-environment-info \
+              --environment-name ${{ env.EB_ENVIRONMENT_NAME }} \
+              --region ${{ env.AWS_REGION }} \
+              --info-type tail
+            
+            # Get recent events
+            aws elasticbeanstalk describe-events \
+              --environment-name ${{ env.EB_ENVIRONMENT_NAME }} \
+              --region ${{ env.AWS_REGION }} \
+              --max-items 10 \
+              --query 'Events[*].{Time:EventDate, Message:Message}' \
+              --output table
+            
+            # If health is not Green, try to restart the app server
+            if [ "$HEALTH" != "Green" ]; then
+              echo "Attempting to restart application server..."
+              aws elasticbeanstalk restart-app-server \
+                --environment-name ${{ env.EB_ENVIRONMENT_NAME }} \
+                --region ${{ env.AWS_REGION }}
+            fi
+          fi
 
   deploy-infrastructure:
     needs: [deploy, build-frontend]
