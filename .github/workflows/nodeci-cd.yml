@@ -139,21 +139,46 @@ jobs:
             EOF
           fi
           
+          # Create Procfile for Elastic Beanstalk
+          echo "Creating Procfile..."
+          cat > Procfile << 'EOF'
+          web: npm start
+          EOF
+          
+          # Create .npmrc for Node.js configuration
+          echo "Creating .npmrc..."
+          cat > .npmrc << 'EOF'
+          engine-strict=true
+          EOF
+          
+          # Create .ebextensions for Elastic Beanstalk configuration
+          mkdir -p .ebextensions
+          cat > .ebextensions/nodecommand.config << 'EOF'
+          option_settings:
+            aws:elasticbeanstalk:container:nodejs:
+              NodeCommand: "npm start"
+              NodeVersion: 22
+            aws:elasticbeanstalk:container:nodejs:staticfiles:
+              /public: /public
+          EOF
+          
           # Include all necessary files
-          zip -r $ZIP_FILE_NAME . \
-            -x "*.git*" \
-            -x "node_modules/*" \
-            -x ".github/*" \
-            -x ".idea/*" \
-            -x "*.DS_Store" \
-            -x "apps/$FRONTEND_APP_NAME/*" \
-            -x "terraform/*" \
-            -i "*.js" \
-            -i "*.json" \
-            -i "dist/*" \
-            -i "public/*" \
-            -i "package.json" \
-            -i "package-lock.json"
+          echo "Creating deployment package..."
+          zip -r $ZIP_FILE_NAME \
+            package.json \
+            package-lock.json \
+            Procfile \
+            .npmrc \
+            .ebextensions/ \
+            dist/ \
+            public/ \
+            node_modules/ \
+            --exclude "*.git*" \
+            --exclude ".github/*" \
+            --exclude ".idea/*" \
+            --exclude "*.DS_Store" \
+            --exclude "apps/$FRONTEND_APP_NAME/*" \
+            --exclude "terraform/*"
           
           echo "Deployment package contents:"
           unzip -l $ZIP_FILE_NAME
@@ -166,12 +191,16 @@ jobs:
           fi
           
           echo "Checking zip contents..."
-          if ! unzip -l "${{ env.ZIP_FILE_NAME }}" | grep -q "public/index.html"; then
-            echo "Error: public/index.html not found in zip"
-            echo "Zip contents:"
-            unzip -l "${{ env.ZIP_FILE_NAME }}"
-            exit 1
-          fi
+          REQUIRED_FILES=("package.json" "Procfile" ".npmrc" ".ebextensions/nodecommand.config" "public/index.html" "dist/app.js")
+          
+          for file in "${REQUIRED_FILES[@]}"; do
+            if ! unzip -l "${{ env.ZIP_FILE_NAME }}" | grep -q "$file"; then
+              echo "Error: Required file $file not found in zip"
+              echo "Zip contents:"
+              unzip -l "${{ env.ZIP_FILE_NAME }}"
+              exit 1
+            fi
+          done
           
           echo "Deployment package validated successfully"
 
