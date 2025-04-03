@@ -306,13 +306,59 @@ jobs:
 
       - name: Backup Terraform State
         run: |
+          # Create necessary directories
+          mkdir -p terraform/backups
+          mkdir -p terraform/terraform-state-backups
+          
           cd terraform
+          
+          # Create backup script if it doesn't exist
+          cat > scripts/backup_state.sh << 'EOF'
+          #!/bin/bash
+          
+          # Create directories if they don't exist
+          mkdir -p backups
+          mkdir -p terraform-state-backups
+          
+          # Get current timestamp
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          BACKUP_FILE="terraform_${TIMESTAMP}.tfstate.backup"
+          
+          # Create backup of current state
+          cp terraform.tfstate "backups/${BACKUP_FILE}"
+          
+          # Create backup directory in S3 if it doesn't exist
+          aws s3api head-bucket --bucket "${TERRAFORM_STATE_BUCKET}" 2>/dev/null || \
+            aws s3 mb "s3://${TERRAFORM_STATE_BUCKET}"
+          
+          # Upload to S3 with encryption
+          aws s3 cp "backups/${BACKUP_FILE}" \
+            "s3://${TERRAFORM_STATE_BUCKET}/terraform-state-backups/${BACKUP_FILE}" \
+            --sse AES256
+          
+          echo "Backup completed successfully!"
+          
+          # Cleanup old local backups (keep last 5)
+          cd backups && ls -t | tail -n +6 | xargs -r rm --
+          
+          # List current backups
+          echo "Current local backups:"
+          ls -la backups/
+          
+          echo "Current S3 backups:"
+          aws s3 ls "s3://${TERRAFORM_STATE_BUCKET}/terraform-state-backups/"
+          EOF
+          
+          # Make script executable
           chmod +x scripts/backup_state.sh
+          
+          # Run backup script
           ./scripts/backup_state.sh
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: ${{ env.AWS_REGION }}
+          TERRAFORM_STATE_BUCKET: ${{ env.TERRAFORM_STATE_BUCKET }}
 
       - name: Deploy to Elastic Beanstalk
         run: |

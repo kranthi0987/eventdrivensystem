@@ -1,67 +1,53 @@
 #!/bin/bash
+
+# Exit on any error
 set -e
 
-# Configuration
-S3_BUCKET="eventdrivensystem-terraform-state"
-BACKUP_DIR="terraform-state-backups"
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-BACKUP_FILE="terraform_${TIMESTAMP}.tfstate.backup"
-
-# Create backup directory if it doesn't exist
-mkdir -p $BACKUP_DIR
-
-echo "Creating backup of Terraform state files..."
-
-# Create a temporary directory for the files we want to backup
-TEMP_DIR=$(mktemp -d)
-
-# Copy only the files that exist
-if [ -f "terraform.tfstate" ]; then
-  cp terraform.tfstate $TEMP_DIR/
-  echo "Included terraform.tfstate in backup"
-fi
-
-if [ -f "terraform.tfstate.backup" ]; then
-  cp terraform.tfstate.backup $TEMP_DIR/
-  echo "Included terraform.tfstate.backup in backup"
-fi
-
-if [ -f ".terraform.tfstate.lock.info" ]; then
-  cp .terraform.tfstate.lock.info $TEMP_DIR/
-  echo "Included .terraform.tfstate.lock.info in backup"
-fi
-
-# Check if we have any files to backup
-if [ "$(ls -A $TEMP_DIR)" ]; then
-  # Create tar archive
-  tar -czf $BACKUP_DIR/$BACKUP_FILE -C $TEMP_DIR .
-  
-  # Upload to S3
-  echo "Uploading backup to S3 bucket: $S3_BUCKET"
-  aws s3 cp $BACKUP_DIR/$BACKUP_FILE s3://$S3_BUCKET/terraform-state-backups/
-  
-  # Clean up
-  rm -rf $TEMP_DIR
-  rm -f $BACKUP_DIR/$BACKUP_FILE
-  
-  echo "Backup completed successfully!"
-else
-  echo "No Terraform state files found to backup."
-  rm -rf $TEMP_DIR
-  exit 0
-fi
+# Create necessary directories
+mkdir -p backups
+mkdir -p terraform-state-backups
 
 # Get current timestamp
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_FILE="terraform_${TIMESTAMP}.tfstate.backup"
 
+# Verify terraform state exists
+if [ ! -f "terraform.tfstate" ]; then
+    echo "Error: terraform.tfstate not found!"
+    exit 1
+fi
+
 # Create backup of current state
+echo "Creating local backup..."
 cp terraform.tfstate "backups/${BACKUP_FILE}"
 
-# Upload to S3 with encryption
-aws s3 cp "backups/${BACKUP_FILE}" \
-  "s3://${TERRAFORM_STATE_BUCKET}/backups/${BACKUP_FILE}" \
-  --sse AES256
+# Verify backup was created
+if [ ! -f "backups/${BACKUP_FILE}" ]; then
+    echo "Error: Backup file was not created!"
+    exit 1
+fi
 
-# Keep only last 10 backups locally
-cd backups && ls -t | tail -n +11 | xargs -r rm -- 
+# Upload to S3
+echo "Uploading backup to S3..."
+aws s3 cp "backups/${BACKUP_FILE}" \
+    "s3://${TERRAFORM_STATE_BUCKET}/terraform-state-backups/${BACKUP_FILE}" \
+    --sse AES256
+
+# Cleanup old local backups (keep last 5)
+echo "Cleaning up old local backups..."
+cd backups && ls -t | tail -n +6 | xargs -r rm --
+
+# Cleanup old S3 backups (keep last 10)
+echo "Cleaning up old S3 backups..."
+aws s3 ls "s3://${TERRAFORM_STATE_BUCKET}/terraform-state-backups/" | \
+    sort -r | tail -n +11 | \
+    while read -r line; do
+        file=$(echo "$line" | awk '{print $4}')
+        aws s3 rm "s3://${TERRAFORM_STATE_BUCKET}/terraform-state-backups/$file"
+    done
+
+echo "Backup process completed successfully!"
+echo "Local backups:"
+ls -la backups/
+echo "S3 backups:"
+aws s3 ls "s3://${TERRAFORM_STATE_BUCKET}/terraform-state-backups/" 
