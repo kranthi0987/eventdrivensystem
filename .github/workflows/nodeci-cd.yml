@@ -125,7 +125,7 @@ jobs:
           # Create package.json if it doesn't exist
           if [ ! -f "package.json" ]; then
             echo "Creating package.json..."
-            cat > package.json << 'EOF'
+            cat > package.json << 'EOFPKG'
             {
               "name": "eventdrivensystem",
               "version": "1.0.0",
@@ -136,31 +136,61 @@ jobs:
                 "node": "22.x"
               }
             }
-            EOF
+            EOFPKG
           fi
           
           # Create Procfile for Elastic Beanstalk
           echo "Creating Procfile..."
-          cat > Procfile << 'EOF'
+          cat > Procfile << 'EOFPROC'
           web: npm start
-          EOF
+          EOFPROC
           
           # Create .npmrc for Node.js configuration
           echo "Creating .npmrc..."
-          cat > .npmrc << 'EOF'
+          cat > .npmrc << 'EOFNPM'
           engine-strict=true
-          EOF
+          EOFNPM
           
           # Create .ebextensions for Elastic Beanstalk configuration
           mkdir -p .ebextensions
-          cat > .ebextensions/nodecommand.config << 'EOF'
+          cat > .ebextensions/nodecommand.config << 'EOFEB'
           option_settings:
             aws:elasticbeanstalk:container:nodejs:
               NodeCommand: "npm start"
-              NodeVersion: 22
             aws:elasticbeanstalk:container:nodejs:staticfiles:
               /public: /public
-          EOF
+          EOFEB
+          
+          # Create .platform/nginx/conf.d/proxy.conf for Nginx configuration
+          mkdir -p .platform/nginx/conf.d
+          cat > .platform/nginx/conf.d/proxy.conf << 'EOFNGINX'
+          upstream nodejs {
+            server 127.0.0.1:8081;
+            keepalive 256;
+          }
+
+          server {
+            listen 80;
+            server_name localhost;
+
+            location / {
+              proxy_pass http://nodejs;
+              proxy_http_version 1.1;
+              proxy_set_header Upgrade $http_upgrade;
+              proxy_set_header Connection "upgrade";
+              proxy_set_header Host $host;
+              proxy_cache_bypass $http_upgrade;
+              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            }
+
+            location /public {
+              alias /var/app/current/public;
+              expires 1h;
+              add_header Cache-Control public;
+            }
+          }
+          EOFNGINX
           
           # Include all necessary files
           echo "Creating deployment package..."
@@ -170,6 +200,7 @@ jobs:
             Procfile \
             .npmrc \
             .ebextensions/ \
+            .platform/ \
             dist/ \
             public/ \
             node_modules/ \
