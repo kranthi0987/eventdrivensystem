@@ -49,6 +49,12 @@ variable "app_port" {
   default     = 8080
 }
 
+variable "app_name" {
+  description = "Application name"
+  type        = string
+  default     = "eventdrivensystem"
+}
+
 # Elastic Beanstalk Configuration
 variable "solution_stack_name" {
   description = "Elastic Beanstalk solution stack name"
@@ -60,6 +66,18 @@ variable "instance_type" {
   description = "EC2 instance type for Elastic Beanstalk"
   type        = string
   default     = "t3.micro"
+}
+
+variable "min_instances" {
+  description = "Minimum number of instances in the Auto Scaling Group"
+  type        = number
+  default     = 1
+}
+
+variable "max_instances" {
+  description = "Maximum number of instances in the Auto Scaling Group"
+  type        = number
+  default     = 2
 }
 
 # Frontend Configuration
@@ -81,24 +99,6 @@ variable "frontend_certificate_arn" {
   default     = ""
 }
 
-# Additional variables from terraform.tfvars
-variable "app_name" {
-  description = "Application name"
-  type        = string
-  default     = "eventdrivensystem"
-}
-
-variable "min_instances" {
-  description = "Minimum number of instances"
-  type        = number
-  default     = 1
-}
-
-variable "max_instances" {
-  description = "Maximum number of instances"
-  type        = number
-  default     = 1
-}
 
 variable "github_repository_url" {
   description = "GitHub repository URL"
@@ -158,4 +158,4 @@ variable "tags" {
   description = "Tags to apply to all resources"
   type        = map(string)
   default     = {}
-} 
+}

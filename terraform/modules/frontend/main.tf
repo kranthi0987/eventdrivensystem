@@ -19,6 +19,15 @@ resource "aws_s3_bucket_public_access_block" "frontend" {
   restrict_public_buckets = true
 }
 
+# CloudFront Origin Access Control
+resource "aws_cloudfront_origin_access_control" "frontend" {
+  name                              = "${var.environment}-frontend-oac"
+  description                       = "Origin Access Control for ${var.bucket_name}"
+  origin_access_control_origin_type = "s3"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
+}
+
 resource "aws_s3_bucket_policy" "frontend" {
   bucket = aws_s3_bucket.frontend.id
 
@@ -53,9 +62,7 @@ resource "aws_cloudfront_distribution" "frontend" {
     domain_name = aws_s3_bucket.frontend.bucket_regional_domain_name
     origin_id   = "S3-${aws_s3_bucket.frontend.id}"
 
-    s3_origin_config {
-      origin_access_control_id = aws_cloudfront_origin_access_control.frontend.id
-    }
+    origin_access_control_id = aws_cloudfront_origin_access_control.frontend.id
   }
 
   default_cache_behavior {
@@ -114,15 +121,6 @@ resource "aws_cloudfront_distribution" "frontend" {
     response_code      = 200
     response_page_path = "/index.html"
   }
-}
-
-# CloudFront Origin Access Control
-resource "aws_cloudfront_origin_access_control" "frontend" {
-  name                              = "${var.environment}-frontend-oac"
-  description                       = "Origin Access Control for Frontend S3 Bucket"
-  origin_access_control_origin_type = "s3"
-  signing_behavior                  = "always"
-  signing_protocol                  = "sigv4"
 }
 
 # Outputs

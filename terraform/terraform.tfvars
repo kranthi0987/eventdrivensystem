@@ -5,7 +5,7 @@ project_name = "eventdrivensystem"
 
 # VPC Configuration
 vpc_cidr = "10.0.0.0/16"
-availability_zones = ["ap-south-1"]
+availability_zones = ["ap-south-1a", "ap-south-1b", "ap-south-1c"]
 private_subnet_cidrs = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
 public_subnet_cidrs = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
 
@@ -15,12 +15,6 @@ app_port = 3000
 instance_type = "t2.micro"
 min_instances = 1
 max_instances = 1
-
-# RDS Configuration
-db_name = "eventdrivensystem"
-db_username = "admin"
-db_password = "your-secure-password-here"  # Change this in production!
-db_instance_class = "db.t3.micro"
 
 # CI/CD Configuration
 github_repository_url = "https://github.com/kranthi0987/eventdrivensystem"

@@ -193,11 +193,6 @@ module "frontend" {
   certificate_arn = var.frontend_certificate_arn
 }
 
-# Data source to get the current status of the Elastic Beanstalk environment
-data "aws_elastic_beanstalk_environment" "app_status" {
-  name = aws_elastic_beanstalk_environment.app.name
-}
-
 # Outputs
 output "elastic_beanstalk_environment_endpoint" {
   value       = aws_elastic_beanstalk_environment.app.endpoint_url
@@ -215,8 +210,8 @@ output "elastic_beanstalk_environment_id" {
 }
 
 output "elastic_beanstalk_environment_health" {
-  value       = data.aws_elastic_beanstalk_environment.app_status
-  description = "Elastic Beanstalk Environment Health Status"
+  value       = "To check health status, use AWS CLI: aws elasticbeanstalk describe-environments --environment-names ${aws_elastic_beanstalk_environment.app.name} --query 'Environments[0].Health' --output text"
+  description = "Elastic Beanstalk Environment Health Status (check using AWS CLI)"
 }
 
 output "frontend_url" {
