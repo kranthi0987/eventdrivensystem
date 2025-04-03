@@ -54,15 +54,22 @@ module "vpc" {
 
 # Elastic Beanstalk Application
 resource "aws_elastic_beanstalk_application" "app" {
-  name        = "${var.environment}-${var.project_name}"
-  description = "Event Driven System Application"
+  name        = var.elastic_beanstalk_app_name
+  description = "Application for ${var.project_name}"
 }
 
 # Elastic Beanstalk Environment
 resource "aws_elastic_beanstalk_environment" "app" {
-  name                = "${var.environment}-${var.project_name}-env"
+  name                = var.elastic_beanstalk_env_name
   application         = aws_elastic_beanstalk_application.app.name
   solution_stack_name = var.solution_stack_name
+  tier                = "WebServer"
+
+  setting {
+    namespace = "aws:autoscaling:launchconfiguration"
+    name      = "IamInstanceProfile"
+    value     = aws_iam_instance_profile.eb_instance_profile.name
+  }
 
   setting {
     namespace = "aws:autoscaling:launchconfiguration"
@@ -71,27 +78,45 @@ resource "aws_elastic_beanstalk_environment" "app" {
   }
 
   setting {
+    namespace = "aws:autoscaling:asg"
+    name      = "MinSize"
+    value     = var.min_instances
+  }
+
+  setting {
+    namespace = "aws:autoscaling:asg"
+    name      = "MaxSize"
+    value     = var.max_instances
+  }
+
+  setting {
+    namespace = "aws:ec2:vpc"
+    name      = "VPCId"
+    value     = module.vpc.vpc_id
+  }
+
+  setting {
+    namespace = "aws:ec2:vpc"
+    name      = "Subnets"
+    value     = join(",", module.vpc.private_subnet_ids)
+  }
+
+  setting {
+    namespace = "aws:ec2:vpc"
+    name      = "ELBSubnets"
+    value     = join(",", module.vpc.public_subnet_ids)
+  }
+
+  setting {
     namespace = "aws:elasticbeanstalk:environment"
-    name      = "EnvironmentType"
-    value     = "SingleInstance"
+    name      = "LoadBalancerType"
+    value     = "application"
   }
 
   setting {
-    namespace = "aws:autoscaling:launchconfiguration"
-    name      = "IamInstanceProfile"
-    value     = aws_iam_instance_profile.eb_ec2_profile.name
-  }
-
-  setting {
-    namespace = "aws:elasticbeanstalk:container:nodejs"
-    name      = "NodeVersion"
-    value     = "22"
-  }
-
-  setting {
-    namespace = "aws:elasticbeanstalk:container:nodejs"
-    name      = "NodeCommand"
-    value     = "npm start"
+    namespace = "aws:elasticbeanstalk:environment:process:default"
+    name      = "HealthCheckPath"
+    value     = "/health"
   }
 
   setting {
@@ -103,134 +128,20 @@ resource "aws_elastic_beanstalk_environment" "app" {
   setting {
     namespace = "aws:elasticbeanstalk:application:environment"
     name      = "PORT"
-    value     = tostring(var.app_port)
+    value     = var.app_port
   }
 
-  setting {
-    namespace = "aws:elasticbeanstalk:environment:proxy:staticfiles"
-    name      = "/static"
-    value     = "/static"
-  }
-
-  setting {
-    namespace = "aws:elasticbeanstalk:environment:proxy"
-    name      = "ProxyServer"
-    value     = "nginx"
-  }
-
-  setting {
-    namespace = "aws:elasticbeanstalk:environment:process:default"
-    name      = "HealthCheckPath"
-    value     = "/health"
-  }
-
-  setting {
-    namespace = "aws:elasticbeanstalk:environment:process:default"
-    name      = "Port"
-    value     = tostring(var.app_port)
-  }
-
-  setting {
-    namespace = "aws:elasticbeanstalk:environment:process:default"
-    name      = "Protocol"
-    value     = "HTTP"
-  }
-
-  setting {
-    namespace = "aws:elasticbeanstalk:environment:process:default"
-    name      = "StickinessEnabled"
-    value     = "true"
-  }
-
-  setting {
-    namespace = "aws:elasticbeanstalk:environment:process:default"
-    name      = "StickinessLBCookieDurationSeconds"
-    value     = "86400"
-  }
-
-  setting {
-    namespace = "aws:elasticbeanstalk:environment:process:default"
-    name      = "HealthCheckInterval"
-    value     = "30"
-  }
-
-  setting {
-    namespace = "aws:elasticbeanstalk:environment:process:default"
-    name      = "HealthCheckTimeout"
-    value     = "10"
-  }
-
-  setting {
-    namespace = "aws:elasticbeanstalk:environment:process:default"
-    name      = "HealthyThresholdCount"
-    value     = "2"
-  }
-
-  setting {
-    namespace = "aws:elasticbeanstalk:environment:process:default"
-    name      = "UnhealthyThresholdCount"
-    value     = "5"
-  }
-
-  setting {
-    namespace = "aws:elasticbeanstalk:environment:proxy"
-    name      = "ProxyBuffering"
-    value     = "off"
-  }
-
-  setting {
-    namespace = "aws:elasticbeanstalk:environment:proxy"
-    name      = "ProxyBuffers"
-    value     = "8 16k"
-  }
-
-  setting {
-    namespace = "aws:elasticbeanstalk:environment:proxy"
-    name      = "ProxyBufferSize"
-    value     = "8k"
-  }
-
-  setting {
-    namespace = "aws:elasticbeanstalk:environment:proxy"
-    name      = "ProxyBusyBuffersSize"
-    value     = "8k"
-  }
-
-  setting {
-    namespace = "aws:elasticbeanstalk:environment:proxy"
-    name      = "ProxyMaxTempFileSize"
-    value     = "0"
-  }
-
-  setting {
-    namespace = "aws:elasticbeanstalk:environment:proxy"
-    name      = "ProxyConnectTimeout"
-    value     = "5"
-  }
-
-  setting {
-    namespace = "aws:elasticbeanstalk:environment:proxy"
-    name      = "ProxyReadTimeout"
-    value     = "60"
-  }
-
-  setting {
-    namespace = "aws:elasticbeanstalk:environment:proxy"
-    name      = "ProxySendTimeout"
-    value     = "60"
-  }
-
-  vpc_settings {
-    vpc_id             = module.vpc.vpc_id
-    subnet_ids         = module.vpc.private_subnet_ids
-    security_groups    = [aws_security_group.eb_app.id]
-    associate_public_ip_address = false
-  }
+  tags = var.tags
 }
 
-# IAM Roles and Instance Profile
-resource "aws_iam_role" "eb_ec2_role" {
-  name = "${var.environment}-${var.project_name}-eb-ec2-role"
+# IAM Instance Profile for Elastic Beanstalk
+resource "aws_iam_instance_profile" "eb_instance_profile" {
+  name = "${var.project_name}-eb-instance-profile"
+  role = aws_iam_role.eb_instance_role.name
+}
+
+resource "aws_iam_role" "eb_instance_role" {
+  name = "${var.project_name}-eb-instance-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -246,14 +157,9 @@ resource "aws_iam_role" "eb_ec2_role" {
   })
 }
 
-resource "aws_iam_role_policy_attachment" "eb_ec2_role_policy" {
-  role       = aws_iam_role.eb_ec2_role.name
+resource "aws_iam_role_policy_attachment" "eb_web_tier" {
+  role       = aws_iam_role.eb_instance_role.name
   policy_arn = "arn:aws:iam::aws:policy/AWSElasticBeanstalkWebTier"
-}
-
-resource "aws_iam_instance_profile" "eb_ec2_profile" {
-  name = "${var.environment}-${var.project_name}-eb-ec2-profile"
-  role = aws_iam_role.eb_ec2_role.name
 }
 
 # Security Group for Elastic Beanstalk
@@ -287,9 +193,30 @@ module "frontend" {
   certificate_arn = var.frontend_certificate_arn
 }
 
+# Data source to get the current status of the Elastic Beanstalk environment
+data "aws_elastic_beanstalk_environment" "app_status" {
+  name = aws_elastic_beanstalk_environment.app.name
+}
+
 # Outputs
-output "eb_environment_url" {
-  value = aws_elastic_beanstalk_environment.app.cname
+output "elastic_beanstalk_environment_endpoint" {
+  value       = aws_elastic_beanstalk_environment.app.endpoint_url
+  description = "The URL to the Elastic Beanstalk Environment"
+}
+
+output "elastic_beanstalk_environment_name" {
+  value       = aws_elastic_beanstalk_environment.app.name
+  description = "Elastic Beanstalk Environment Name"
+}
+
+output "elastic_beanstalk_environment_id" {
+  value       = aws_elastic_beanstalk_environment.app.id
+  description = "Elastic Beanstalk Environment ID"
+}
+
+output "elastic_beanstalk_environment_health" {
+  value       = data.aws_elastic_beanstalk_environment.app_status
+  description = "Elastic Beanstalk Environment Health Status"
 }
 
 output "frontend_url" {

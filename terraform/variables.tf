@@ -79,4 +79,83 @@ variable "frontend_certificate_arn" {
   description = "ARN of the ACM certificate for the frontend domain"
   type        = string
   default     = ""
+}
+
+# Additional variables from terraform.tfvars
+variable "app_name" {
+  description = "Application name"
+  type        = string
+  default     = "eventdrivensystem"
+}
+
+variable "min_instances" {
+  description = "Minimum number of instances"
+  type        = number
+  default     = 1
+}
+
+variable "max_instances" {
+  description = "Maximum number of instances"
+  type        = number
+  default     = 1
+}
+
+variable "github_repository_url" {
+  description = "GitHub repository URL"
+  type        = string
+  default     = ""
+}
+
+variable "github_repository_id" {
+  description = "GitHub repository ID"
+  type        = string
+  default     = ""
+}
+
+variable "branch_name" {
+  description = "Branch name"
+  type        = string
+  default     = "main"
+}
+
+variable "elastic_beanstalk_app_name" {
+  description = "Elastic Beanstalk application name"
+  type        = string
+  default     = "eventdrivensystem"
+}
+
+variable "elastic_beanstalk_env_name" {
+  description = "Elastic Beanstalk environment name"
+  type        = string
+  default     = "eventdrivensystem-prod"
+}
+
+variable "redis_node_type" {
+  description = "Redis node type"
+  type        = string
+  default     = "cache.t3.micro"
+}
+
+variable "redis_num_cache_nodes" {
+  description = "Number of Redis cache nodes"
+  type        = number
+  default     = 1
+}
+
+variable "redis_parameter_group_family" {
+  description = "Redis parameter group family"
+  type        = string
+  default     = "redis6.x"
+}
+
+variable "redis_port" {
+  description = "Redis port"
+  type        = number
+  default     = 6379
+}
+
+variable "tags" {
+  description = "Tags to apply to all resources"
+  type        = map(string)
+  default     = {}
 } 

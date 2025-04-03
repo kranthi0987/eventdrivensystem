@@ -82,7 +82,7 @@ resource "aws_route_table_association" "public" {
 }
 
 resource "aws_eip" "nat" {
-  domain = "vpc"
+  # Removing the domain attribute as it's causing an error
 }
 
 resource "aws_nat_gateway" "main" {

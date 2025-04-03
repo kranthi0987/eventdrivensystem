@@ -165,14 +165,12 @@ jobs:
         working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
         run: terraform apply -auto-approve -var="frontend_bucket_name=${{ env.S3_BUCKET_NAME }}"
 
-  deploy-to-elastic-beanstalk:
+  check-deployment-status:
     needs: deploy-infrastructure
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
 
     steps:
-      - uses: actions/checkout@v4
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -180,66 +178,38 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Generate unique version label
-        id: version
+      - name: Get Deployment Status and URLs
         run: |
-          TIMESTAMP=$(date +%Y%m%d%H%M%S)
-          SHORT_SHA=${GITHUB_SHA:0:7}
-          UNIQUE_SUFFIX=$(echo $RANDOM | md5sum | head -c 4)
-          echo "version=app-$TIMESTAMP-$SHORT_SHA-$UNIQUE_SUFFIX" >> $GITHUB_OUTPUT
-
-      - name: Deploy to Elastic Beanstalk
-        uses: einaregilsson/beanstalk-deploy@v21
-        with:
-          aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          application_name: ${{ env.EB_APPLICATION_NAME }}
-          environment_name: ${{ env.EB_ENVIRONMENT_NAME }}
-          region: ${{ env.AWS_REGION }}
-          deployment_package: deploy.zip
-          version_label: ${{ steps.version.outputs.version }}
-          wait_for_deployment: true
-          wait_for_environment_recovery: 600
-          error_on_failure: false
-
-      - name: Check Deployment Status
-        if: always()
-        run: |
+          echo "Checking Elastic Beanstalk Environment Status..."
+          
           STATUS=$(aws elasticbeanstalk describe-environments \
             --environment-names ${{ env.EB_ENVIRONMENT_NAME }} \
-            --region ${{ env.AWS_REGION }} \
             --query 'Environments[0].Status' \
             --output text)
           
           HEALTH=$(aws elasticbeanstalk describe-environments \
             --environment-names ${{ env.EB_ENVIRONMENT_NAME }} \
-            --region ${{ env.AWS_REGION }} \
             --query 'Environments[0].Health' \
+            --output text)
+            
+          URL=$(aws elasticbeanstalk describe-environments \
+            --environment-names ${{ env.EB_ENVIRONMENT_NAME }} \
+            --query 'Environments[0].CNAME' \
             --output text)
           
           echo "Environment Status: $STATUS"
           echo "Environment Health: $HEALTH"
+          echo "Application URL: http://$URL"
+          
+          # Get frontend URL
+          FRONTEND_URL=$(aws s3 website s3://${{ env.S3_BUCKET_NAME }} --get | grep -o 'http://.*')
+          echo "Frontend URL: $FRONTEND_URL"
           
           if [ "$STATUS" != "Ready" ] || [ "$HEALTH" != "Green" ]; then
-            echo "Deployment may have issues. Checking logs..."
-            aws elasticbeanstalk retrieve-environment-info \
-              --environment-name ${{ env.EB_ENVIRONMENT_NAME }} \
-              --region ${{ env.AWS_REGION }} \
-              --info-type tail
-            
-            # Get recent events
+            echo "Warning: Environment may have issues. Checking recent events..."
             aws elasticbeanstalk describe-events \
               --environment-name ${{ env.EB_ENVIRONMENT_NAME }} \
-              --region ${{ env.AWS_REGION }} \
               --max-items 10 \
-              --query 'Events[*].{Time:EventDate, Message:Message}' \
+              --query 'Events[*].{Time:EventDate,Message:Message}' \
               --output table
-            
-            # If health is not Green, try to restart the app server
-            if [ "$HEALTH" != "Green" ]; then
-              echo "Attempting to restart application server..."
-              aws elasticbeanstalk restart-app-server \
-                --environment-name ${{ env.EB_ENVIRONMENT_NAME }} \
-                --region ${{ env.AWS_REGION }}
-            fi
           fi
