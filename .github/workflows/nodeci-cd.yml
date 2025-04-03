@@ -10,10 +10,10 @@ on:
 permissions:
   contents: read
   packages: read
-  actions: read
   id-token: write
   checks: write
   deployments: write
+  actions: write  # Required for uploading/downloading artifacts
 
 env:
   AWS_REGION: ap-south-1
@@ -150,12 +150,13 @@ jobs:
           echo "Deployment package validated successfully"
 
       - name: Upload deployment package
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: deployment-package
           path: ${{ env.ZIP_FILE_NAME }}
           retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
           if-no-files-found: error
+          compression-level: 9
 
   build-frontend:
     needs: build-backend
@@ -231,16 +232,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
       - name: Download deployment package
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: deployment-package
           path: .
+          merge-multiple: false
 
       - name: Verify deployment package
         run: |
           if [ ! -f "${{ env.ZIP_FILE_NAME }}" ]; then
             echo "Error: Deployment package not found"
+            echo "Current directory contents:"
             ls -la
             exit 1
           fi
