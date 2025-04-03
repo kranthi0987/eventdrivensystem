@@ -42,6 +42,11 @@ resource "aws_s3_bucket_public_access_block" "terraform_state" {
   restrict_public_buckets = true
 }
 
+# Use data source for existing Elastic Beanstalk application
+data "aws_elastic_beanstalk_application" "app" {
+  name = var.elastic_beanstalk_app_name
+}
+
 module "vpc" {
   source = "./modules/vpc"
   
@@ -52,16 +57,10 @@ module "vpc" {
   public_subnets  = var.public_subnet_cidrs
 }
 
-# Elastic Beanstalk Application
-resource "aws_elastic_beanstalk_application" "app" {
-  name        = var.elastic_beanstalk_app_name
-  description = "Application for ${var.project_name}"
-}
-
 # Elastic Beanstalk Environment
 resource "aws_elastic_beanstalk_environment" "app" {
   name                = var.elastic_beanstalk_env_name
-  application         = aws_elastic_beanstalk_application.app.name
+  application         = data.aws_elastic_beanstalk_application.app.name
   solution_stack_name = var.solution_stack_name
   tier                = "WebServer"
 
