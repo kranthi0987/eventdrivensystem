@@ -394,6 +394,14 @@ jobs:
             exit 1
           fi
           
+          # Create application if it doesn't exist
+          if ! aws elasticbeanstalk describe-applications --application-names "${EB_APPLICATION_NAME}" >/dev/null 2>&1; then
+            echo "Creating Elastic Beanstalk application..."
+            aws elasticbeanstalk create-application \
+              --application-name "${EB_APPLICATION_NAME}" \
+              --description "Event Driven System Application"
+          fi
+          
           echo "Creating new application version: ${VERSION_LABEL}"
           aws elasticbeanstalk create-application-version \
             --application-name "${EB_APPLICATION_NAME}" \
@@ -402,11 +410,37 @@ jobs:
             --source-bundle "S3Bucket=${TERRAFORM_STATE_BUCKET},S3Key=${ZIP_FILE_NAME}" \
             --process
           
-          echo "Updating environment with new version..."
-          aws elasticbeanstalk update-environment \
+          # Check if environment exists
+          if ! aws elasticbeanstalk describe-environments \
             --application-name "${EB_APPLICATION_NAME}" \
-            --environment-name "${EB_ENVIRONMENT_NAME}" \
-            --version-label "${VERSION_LABEL}"
+            --environment-names "${EB_ENVIRONMENT_NAME}" \
+            --include-deleted=false \
+            --query 'Environments[0]' >/dev/null 2>&1; then
+            
+            echo "Creating new environment..."
+            aws elasticbeanstalk create-environment \
+              --application-name "${EB_APPLICATION_NAME}" \
+              --environment-name "${EB_ENVIRONMENT_NAME}" \
+              --solution-stack-name "${SOLUTION_STACK}" \
+              --option-settings \
+                "Namespace=aws:autoscaling:launchconfiguration,OptionName=InstanceType,Value=${INSTANCE_TYPE}" \
+                "Namespace=aws:elasticbeanstalk:environment,OptionName=EnvironmentType,Value=SingleInstance" \
+                "Namespace=aws:elasticbeanstalk:application:environment,OptionName=NODE_ENV,Value=production" \
+                "Namespace=aws:elasticbeanstalk:container:nodejs,OptionName=NodeVersion,Value=22" \
+                "Namespace=aws:elasticbeanstalk:container:nodejs,OptionName=ProxyServer,Value=nginx" \
+                "Namespace=aws:elasticbeanstalk:environment:proxy,OptionName=ProxyServer,Value=nginx" \
+                "Namespace=aws:elasticbeanstalk:container:nodejs,OptionName=NodeCommand,Value=npm start" \
+                "Namespace=aws:elasticbeanstalk:application:environment,OptionName=PORT,Value=8081" \
+                "Namespace=aws:elasticbeanstalk:environment:process:default,OptionName=HealthCheckPath,Value=/" \
+                "Namespace=aws:elasticbeanstalk:environment:process:default,OptionName=Port,Value=8081" \
+              --version-label "${VERSION_LABEL}"
+          else
+            echo "Updating existing environment..."
+            aws elasticbeanstalk update-environment \
+              --application-name "${EB_APPLICATION_NAME}" \
+              --environment-name "${EB_ENVIRONMENT_NAME}" \
+              --version-label "${VERSION_LABEL}"
+          fi
           
           # Monitor deployment status
           echo "Monitoring deployment status..."
@@ -474,6 +508,8 @@ jobs:
           EB_ENVIRONMENT_NAME: ${{ env.EB_ENVIRONMENT_NAME }}
           TERRAFORM_STATE_BUCKET: ${{ env.TERRAFORM_STATE_BUCKET }}
           ZIP_FILE_NAME: ${{ env.ZIP_FILE_NAME }}
+          SOLUTION_STACK: ${{ env.SOLUTION_STACK }}
+          INSTANCE_TYPE: ${{ env.INSTANCE_TYPE }}
 
   check-deployment-status:
     needs: deploy-infrastructure
