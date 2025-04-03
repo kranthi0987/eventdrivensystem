@@ -85,5 +85,6 @@ app.get('/health', (req, res) => {
 
 app.listen(3000, () => {
     console.log('Source app running on port 3000');
-    simulateEvents();
+    // Commented out to stop automatic event simulation
+    // simulateEvents();
 });

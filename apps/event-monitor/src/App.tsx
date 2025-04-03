@@ -19,10 +19,12 @@ import {
   AccordionDetails,
   IconButton,
   Tooltip,
-  Divider
+  Divider,
+  Chip
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import DeleteIcon from '@mui/icons-material/Delete';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import axios from 'axios';
 import jwtEncode from 'jwt-encode';
 import { v4 as uuidv4 } from 'uuid';
@@ -44,6 +46,14 @@ interface AuthConfig {
   };
 }
 
+const SAMPLE_EVENTS = [
+  { name: 'UserRegistered', body: 'test body' },
+  { name: 'OrderCreated', body: 'test body' },
+  { name: 'PaymentProcessed', body: 'test body' },
+  { name: 'EmailSent', body: 'test body' },
+  { name: 'InventoryUpdated', body: 'test body' }
+];
+
 function App() {
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(false);
@@ -57,10 +67,12 @@ function App() {
   const [eventBody, setEventBody] = useState('test body');
   const [eventName, setEventName] = useState('test event');
   const [generatedToken, setGeneratedToken] = useState<string | null>(null);
+  const [simulationInProgress, setSimulationInProgress] = useState(false);
+  const [simulationProgress, setSimulationProgress] = useState(0);
 
   const generateToken = () => {
     try {
-      const token = jwtEncode(authConfig.payload, 'dummy-secret', { algorithm: 'HS256' });
+      const token = jwtEncode(authConfig.payload, '1234567890', { algorithm: 'HS256' });
       setGeneratedToken(token);
       return token;
     } catch (err) {
@@ -74,13 +86,11 @@ function App() {
       id: uuidv4(),
       name: eventName,
       body: eventBody,
-      timestamp: new Date().toISOString(),
-      status: 'pending'
+      timestamp: new Date().toISOString()
     };
     try {
       setLoading(true);
       setError(null);
-
 
       // Add event to local state
       setEvents(prev => [...prev, event]);
@@ -94,8 +104,10 @@ function App() {
       // Send event to bridge service
       const response = await axios.post('http://localhost:3001/api/events', event, {
         headers: {
-          'Authorization': `Bearer ${token}`
-        }
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        withCredentials: true
       });
 
       if (response.status === 202) {
@@ -110,6 +122,7 @@ function App() {
         );
       }
     } catch (err: any) {
+      console.error('Error triggering event:', err);
       setError(err.message || 'Failed to trigger event. Please try again.');
       setEvents(prev => 
         prev.map(e => 
@@ -146,6 +159,29 @@ function App() {
         [field]: value
       }
     }));
+  };
+
+  const simulateEvents = async () => {
+    setSimulationInProgress(true);
+    setSimulationProgress(0);
+    
+    try {
+      for (let i = 0; i < SAMPLE_EVENTS.length; i++) {
+        const event = SAMPLE_EVENTS[i];
+        setEventName(event.name);
+        setEventBody(event.body);
+        await triggerEvent();
+        setSimulationProgress(((i + 1) / SAMPLE_EVENTS.length) * 100);
+        // Add a small delay between events
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    } catch (error) {
+      console.error('Simulation failed:', error);
+      setError('Failed to complete event simulation');
+    } finally {
+      setSimulationInProgress(false);
+      setSimulationProgress(0);
+    }
   };
 
   return (
@@ -245,19 +281,39 @@ function App() {
         </AccordionDetails>
       </Accordion>
 
-      <Box sx={{ mb: 4 }}>
+      <Box sx={{ mb: 4, display: 'flex', gap: 2, alignItems: 'center' }}>
         <Button 
           variant="contained" 
           onClick={triggerEvent}
-          disabled={loading}
-          startIcon={loading ? <CircularProgress size={20} /> : null}
+          disabled={loading || simulationInProgress}
         >
           Trigger Event
         </Button>
+
+        <Button
+          variant="contained"
+          color="secondary"
+          onClick={simulateEvents}
+          disabled={loading || simulationInProgress}
+          startIcon={<PlayArrowIcon />}
+        >
+          Simulate Events
+        </Button>
+
+        {(loading || simulationInProgress) && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <CircularProgress size={24} />
+            {simulationInProgress && (
+              <Typography variant="body2">
+                Simulation Progress: {Math.round(simulationProgress)}%
+              </Typography>
+            )}
+          </Box>
+        )}
       </Box>
 
       {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>
+        <Alert severity="error" sx={{ mb: 4 }}>
           {error}
         </Alert>
       )}
@@ -266,42 +322,60 @@ function App() {
         <Table>
           <TableHead>
             <TableRow>
-              <TableCell>Event ID</TableCell>
-              <TableCell>Name</TableCell>
               <TableCell>Timestamp</TableCell>
+              <TableCell>Event Name</TableCell>
               <TableCell>Status</TableCell>
-              <TableCell>Body</TableCell>
-              <TableCell>Response</TableCell>
+              <TableCell>Details</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {events.map((event) => (
               <TableRow key={event.id}>
-                <TableCell>{event.id}</TableCell>
-                <TableCell>{event.name}</TableCell>
                 <TableCell>{new Date(event.timestamp).toLocaleString()}</TableCell>
                 <TableCell>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    {event.status === 'pending' && <CircularProgress size={20} />}
-                    {event.status === 'success' && (
-                      <Alert severity="success" sx={{ py: 0 }}>
-                        Success
-                      </Alert>
-                    )}
-                    {event.status === 'error' && (
-                      <Alert severity="error" sx={{ py: 0 }}>
-                        Error
-                      </Alert>
-                    )}
+                    {event.name}
+                    <Chip
+                      label={event.status}
+                      color={event.status === 'success' ? 'success' : event.status === 'error' ? 'error' : 'default'}
+                      size="small"
+                    />
                   </Box>
                 </TableCell>
-                <TableCell>{event.body}</TableCell>
+                <TableCell>{event.status}</TableCell>
                 <TableCell>
-                  {event.response && (
-                    <pre style={{ margin: 0 }}>
-                      {JSON.stringify(event.response, null, 2)}
-                    </pre>
-                  )}
+                  <Accordion>
+                    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                      <Typography>View Details</Typography>
+                    </AccordionSummary>
+                    <AccordionDetails>
+                      <Typography variant="subtitle2" gutterBottom>
+                        Event Body:
+                      </Typography>
+                      <TextField
+                        fullWidth
+                        multiline
+                        rows={2}
+                        value={event.body}
+                        InputProps={{ readOnly: true }}
+                        sx={{ mb: 2 }}
+                      />
+                      {event.response && (
+                        <>
+                          <Typography variant="subtitle2" gutterBottom>
+                            Response:
+                          </Typography>
+                          <TextField
+                            fullWidth
+                            multiline
+                            rows={2}
+                            value={JSON.stringify(event.response, null, 2)}
+                            InputProps={{ readOnly: true }}
+                          />
+                        </>
+                      )}
+                    </AccordionDetails>
+                  </Accordion>
                 </TableCell>
               </TableRow>
             ))}

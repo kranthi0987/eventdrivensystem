@@ -57,12 +57,14 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        working-directory: apps/$FRONTEND_APP_NAME
-        run: npm ci
+        run: |
+          cd apps/event-monitor
+          npm ci
 
       - name: Build frontend
-        working-directory: apps/$FRONTEND_APP_NAME
-        run: npm run build
+        run: |
+          cd apps/event-monitor
+          npm run build
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -73,8 +75,8 @@ jobs:
 
       - name: Deploy to S3
         run: |
-          aws s3 sync apps/$FRONTEND_APP_NAME/dist s3://$S3_BUCKET_NAME --delete
-          aws s3 cp apps/$FRONTEND_APP_NAME/dist/index.html s3://$S3_BUCKET_NAME/index.html --cache-control "no-cache,no-store,must-revalidate"
+          aws s3 sync apps/event-monitor/dist s3://$S3_BUCKET_NAME --delete
+          aws s3 cp apps/event-monitor/dist/index.html s3://$S3_BUCKET_NAME/index.html --cache-control "no-cache,no-store,must-revalidate"
 
       - name: Invalidate CloudFront cache
         run: |
@@ -200,7 +202,19 @@ jobs:
                 "[
                   {\"Namespace\":\"aws:autoscaling:launchconfiguration\",\"OptionName\":\"InstanceType\",\"Value\":\"${{ env.INSTANCE_TYPE }}\"},
                   {\"Namespace\":\"aws:elasticbeanstalk:environment\",\"OptionName\":\"EnvironmentType\",\"Value\":\"SingleInstance\"},
-                  {\"Namespace\":\"aws:autoscaling:launchconfiguration\",\"OptionName\":\"IamInstanceProfile\",\"Value\":\"aws-elasticbeanstalk-ec2-role\"}
+                  {\"Namespace\":\"aws:autoscaling:launchconfiguration\",\"OptionName\":\"IamInstanceProfile\",\"Value\":\"aws-elasticbeanstalk-ec2-role\"},
+                  {\"Namespace\":\"aws:elasticbeanstalk:container:nodejs\",\"OptionName\":\"NodeVersion\",\"Value\":\"22\"},
+                  {\"Namespace\":\"aws:elasticbeanstalk:container:nodejs\",\"OptionName\":\"NodeCommand\",\"Value\":\"npm start\"},
+                  {\"Namespace\":\"aws:elasticbeanstalk:application:environment\",\"OptionName\":\"NODE_ENV\",\"Value\":\"production\"},
+                  {\"Namespace\":\"aws:elasticbeanstalk:application:environment\",\"OptionName\":\"PORT\",\"Value\":\"8080\"},
+                  {\"Namespace\":\"aws:elasticbeanstalk:application:environment\",\"OptionName\":\"CORS_ORIGIN\",\"Value\":\"*\"},
+                  {\"Namespace\":\"aws:elasticbeanstalk:environment:proxy:staticfiles\",\"OptionName\":\"/static\",\"Value\":\"/static\"},
+                  {\"Namespace\":\"aws:elasticbeanstalk:environment:proxy\",\"OptionName\":\"ProxyServer\",\"Value\":\"nginx\"},
+                  {\"Namespace\":\"aws:elasticbeanstalk:environment:process:default\",\"OptionName\":\"HealthCheckPath\",\"Value\":\"/\"},
+                  {\"Namespace\":\"aws:elasticbeanstalk:environment:process:default\",\"OptionName\":\"Port\",\"Value\":\"8080\"},
+                  {\"Namespace\":\"aws:elasticbeanstalk:environment:process:default\",\"OptionName\":\"Protocol\",\"Value\":\"HTTP\"},
+                  {\"Namespace\":\"aws:elasticbeanstalk:environment:process:default\",\"OptionName\":\"StickinessEnabled\",\"Value\":\"true\"},
+                  {\"Namespace\":\"aws:elasticbeanstalk:environment:process:default\",\"OptionName\":\"StickinessLBCookieDurationSeconds\",\"Value\":\"86400\"}
                 ]" \
               --region ${{ env.AWS_REGION }}
 
@@ -248,6 +262,7 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
+      
       - name: Verify Environment Status
         run: |
             aws elasticbeanstalk describe-environments \
@@ -264,9 +279,10 @@ jobs:
           UNIQUE_SUFFIX=$(echo $RANDOM | md5sum | head -c 4)
           echo "version=app-$TIMESTAMP-$SHORT_SHA-$UNIQUE_SUFFIX" >> $GITHUB_OUTPUT
 
+
       - name: Generate deployment package
         run: |
-          zip -r deploy.zip . -x "*.git*" "node_modules/*" "tests/*" "*.env*"
+          zip -r deploy.zip . -x "*.git*" "node_modules/*" "tests/*" "*.env*" "apps/$FRONTEND_APP_NAME/*"
 
       - name: Deploy to Elastic Beanstalk
         uses: einaregilsson/beanstalk-deploy@v21
@@ -276,7 +292,7 @@ jobs:
           application_name: ${{ env.EB_APPLICATION_NAME }}
           environment_name: ${{ env.EB_ENVIRONMENT_NAME }}
           region: ${{ env.AWS_REGION }}
-          deployment_package: ${{ env.ZIP_FILE_NAME }}
+          deployment_package: deploy.zip
           version_label: ${{ steps.version.outputs.version }}
           wait_for_deployment: true
 

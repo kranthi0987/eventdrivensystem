@@ -10,25 +10,33 @@ const jwtService = new JWTService(jwtConfig);
 function authenticateJWT(req: express.Request, res: express.Response, next: express.NextFunction) {
     const authHeader = req.headers.authorization;
     if (!authHeader) {
+        console.error('Authentication failed: Missing authorization header');
         return res.status(401).send('Authorization header missing');
     }
     const token = authHeader.split(' ')[1];
     try {
         const payload = jwtService.verifyToken(token);
         if (payload.service !== 'source') {
+            console.error(`Authentication failed: Invalid service token. Expected 'source', got '${payload.service}'`);
             return res.status(403).send('Invalid service token');
         }
+        console.log(`Authentication successful for service: ${payload.service}, id: ${payload.id}`);
         next();
     } catch (err) {
-        return res.status(401).send('Invalid or expired token'+err);
+        console.error('Authentication failed: Invalid or expired token', err);
+        return res.status(401).send('Invalid or expired token');
     }
 }
 
 const app = express();
 
-
-// Handle preflight requests explicitly
-app.options('*', cors());
+// Configure CORS to allow requests from the event-monitor app
+app.use(cors({
+    origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true
+}));
 
 app.use(express.json());
 
@@ -71,16 +79,29 @@ app.post('/api/events', (req, res) => {
     const event = req.body as SourceEvent;
 
     if (!event.id || !event.name || !event.body || !event.timestamp) {
+        console.error('Invalid event format received:', event);
         return res.status(400).send('Invalid event format');
     }
 
+    console.log(`Received event: ${event.id}, name: ${event.name}, timestamp: ${event.timestamp}`);
+    
     eventQueue.add(event)
         .then(() => {
-            res.status(202).send('Event accepted for processing');
+            console.log(`Event ${event.id} successfully queued for processing`);
+            res.status(202).send({
+                message: 'Event accepted for processing',
+                eventId: event.id,
+                timestamp: new Date().toISOString()
+            });
         })
         .catch((err: Error) => {
-            console.error('Error adding to queue:', err.message);
-            res.status(500).send('Internal server error');
+            console.error(`Error adding event ${event.id} to queue:`, err.message);
+            res.status(500).send({
+                message: 'Internal server error',
+                error: err.message,
+                eventId: event.id,
+                timestamp: new Date().toISOString()
+            });
         });
 });
 
