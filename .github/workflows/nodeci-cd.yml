@@ -162,8 +162,55 @@ jobs:
         run: terraform plan -var="frontend_bucket_name=${{ env.S3_BUCKET_NAME }}"
 
       - name: Terraform Apply
-        working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
-        run: terraform apply -auto-approve -var="frontend_bucket_name=${{ env.S3_BUCKET_NAME }}"
+        run: |
+          cd terraform
+          terraform apply -auto-approve \
+            -var="frontend_bucket_name=${{ env.S3_BUCKET_NAME }}"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+
+      - name: Backup Terraform State
+        run: |
+          cd terraform
+          chmod +x scripts/backup_state.sh
+          ./scripts/backup_state.sh
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+
+      - name: Deploy to Elastic Beanstalk
+        run: |
+          cd terraform
+          chmod +x scripts/deploy_to_eb.sh
+          ./scripts/deploy_to_eb.sh
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+          EB_APPLICATION_NAME: ${{ env.EB_APPLICATION_NAME }}
+          EB_ENVIRONMENT_NAME: ${{ env.EB_ENVIRONMENT_NAME }}
+
+      - name: Check Deployment Status
+        run: |
+          echo "Waiting for deployment to complete..."
+          sleep 30
+          STATUS=$(aws elasticbeanstalk describe-environments --environment-names ${{ env.EB_ENVIRONMENT_NAME }} --query 'Environments[0].Status' --output text)
+          HEALTH=$(aws elasticbeanstalk describe-environments --environment-names ${{ env.EB_ENVIRONMENT_NAME }} --query 'Environments[0].Health' --output text)
+          echo "Environment Status: $STATUS"
+          echo "Environment Health: $HEALTH"
+          
+          if [ "$STATUS" != "Ready" ] || [ "$HEALTH" != "Green" ]; then
+            echo "Deployment is still in progress or has issues. Checking logs..."
+            aws elasticbeanstalk retrieve-environment-info --environment-name ${{ env.EB_ENVIRONMENT_NAME }} --info-type tail
+            exit 1
+          fi
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ env.AWS_REGION }}
 
   check-deployment-status:
     needs: deploy-infrastructure

@@ -26,6 +26,11 @@ data "aws_iam_role" "eb_instance_role" {
   name = "${var.project_name}-eb-instance-role"
 }
 
+# Use data source for existing IAM instance profile
+data "aws_iam_instance_profile" "eb_instance_profile" {
+  name = "${var.app_name}-eb-instance-profile"
+}
+
 module "vpc" {
   source = "./modules/vpc"
   
@@ -38,21 +43,21 @@ module "vpc" {
 
 # Elastic Beanstalk Environment
 resource "aws_elastic_beanstalk_environment" "app" {
-  name                = var.elastic_beanstalk_env_name
+  name                = "${var.app_name}-${var.environment}"
   application         = data.aws_elastic_beanstalk_application.app.name
-  solution_stack_name = var.solution_stack_name
+  solution_stack_name = "64bit Amazon Linux 2023 v6.5.0 running Node.js 22"
   tier                = "WebServer"
 
   setting {
     namespace = "aws:autoscaling:launchconfiguration"
     name      = "IamInstanceProfile"
-    value     = aws_iam_instance_profile.eb_instance_profile.name
+    value     = data.aws_iam_instance_profile.eb_instance_profile.name
   }
 
   setting {
     namespace = "aws:autoscaling:launchconfiguration"
     name      = "InstanceType"
-    value     = var.instance_type
+    value     = "t3.micro"
   }
 
   setting {
@@ -110,12 +115,6 @@ resource "aws_elastic_beanstalk_environment" "app" {
   }
 
   tags = var.tags
-}
-
-# IAM Instance Profile for Elastic Beanstalk
-resource "aws_iam_instance_profile" "eb_instance_profile" {
-  name = "${var.project_name}-eb-instance-profile"
-  role = data.aws_iam_role.eb_instance_role.name
 }
 
 # Security Group for Elastic Beanstalk
