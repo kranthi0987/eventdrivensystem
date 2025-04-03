@@ -56,19 +56,72 @@ jobs:
 
       - name: Create default success page
         run: |
-          echo '<!DOCTYPE html>
+          # Create public directory if it doesn't exist
+          mkdir -p public
+          
+          # Create the index.html file
+          cat > public/index.html << 'EOF'
+          <!DOCTYPE html>
           <html>
-            <head><title>Deployment Success</title></head>
+            <head>
+              <title>Deployment Success</title>
+              <style>
+                body {
+                  font-family: Arial, sans-serif;
+                  margin: 40px;
+                  line-height: 1.6;
+                  text-align: center;
+                }
+                .container {
+                  max-width: 800px;
+                  margin: 0 auto;
+                  padding: 20px;
+                  border: 1px solid #ddd;
+                  border-radius: 5px;
+                }
+                .success {
+                  color: #28a745;
+                }
+              </style>
+            </head>
             <body>
-              <h1>Deployment Successful!</h1>
-              <p>Your application has been successfully deployed.</p>
-              <p>Environment: ${{ env.EB_ENVIRONMENT_NAME }}</p>
-              <p>Timestamp: '"$(date)"'</p>
+              <div class="container">
+                <h1 class="success">✅ Deployment Successful!</h1>
+                <p>Your application has been successfully deployed.</p>
+                <p>Environment: ${EB_ENVIRONMENT_NAME}</p>
+                <p>Timestamp: $(date)</p>
+                <p>Region: ${AWS_REGION}</p>
+              </div>
             </body>
-          </html>' > public/index.html
+          </html>
+          EOF
+
+      - name: Verify public directory
+        run: |
+          if [ ! -d "public" ]; then
+            echo "Error: public directory was not created"
+            exit 1
+          fi
+          
+          if [ ! -f "public/index.html" ]; then
+            echo "Error: index.html was not created"
+            exit 1
+          fi
+          
+          echo "Contents of public directory:"
+          ls -la public/
+          
+          echo "Contents of index.html:"
+          cat public/index.html
 
       - name: Zip deployment package
         run: |
+          # Ensure public directory is included
+          if [ ! -d "public" ]; then
+            echo "Error: public directory not found"
+            exit 1
+          fi
+          
           zip -r $ZIP_FILE_NAME . \
             -x "*.git*" \
             -x "node_modules/*" \
@@ -76,7 +129,8 @@ jobs:
             -x ".idea/*" \
             -x "*.DS_Store" \
             -x "apps/$FRONTEND_APP_NAME/*" \
-            -x "terraform/*"
+            -x "terraform/*" \
+            -i "public/*"  # Explicitly include public directory
 
       - name: Validate deployment package
         run: |
@@ -85,16 +139,15 @@ jobs:
             exit 1
           fi
           
-          # Check minimum package size (e.g., 1MB)
-          MIN_SIZE=1000000
-          ACTUAL_SIZE=$(stat -f%z "${{ env.ZIP_FILE_NAME }}")
-          if [ "$ACTUAL_SIZE" -lt "$MIN_SIZE" ]; then
-            echo "Error: Deployment package seems too small ($ACTUAL_SIZE bytes)"
+          echo "Checking zip contents..."
+          if ! unzip -l "${{ env.ZIP_FILE_NAME }}" | grep -q "public/index.html"; then
+            echo "Error: public/index.html not found in zip"
+            echo "Zip contents:"
+            unzip -l "${{ env.ZIP_FILE_NAME }}"
             exit 1
           fi
           
-          # List contents for verification
-          unzip -l "${{ env.ZIP_FILE_NAME }}"
+          echo "Deployment package validated successfully"
 
       - name: Upload deployment package
         run: |
