@@ -1,8 +1,9 @@
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import eventQueue from './event-queue';
 import { SourceEvent } from './types';
 import { JWTService, jwtConfig } from 'shared-auth';
+import path from 'path';
 
 const jwtService = new JWTService(jwtConfig);
 
@@ -118,6 +119,73 @@ app.post('/api/events', (req, res) => {
  */
 app.get('/health', (req, res) => {
     res.status(200).send('OK');
+});
+
+// Add default success route handler
+app.get('/', (req: Request, res: Response) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Bridge Service - Deployment Success</title>
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+            line-height: 1.6;
+            color: #333;
+          }
+          .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+          }
+          .success {
+            color: #28a745;
+          }
+          .info {
+            color: #17a2b8;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1 class="success">✅ Bridge Service Successfully Deployed!</h1>
+          <p class="info">Environment: ${process.env.NODE_ENV || 'development'}</p>
+          <p>Server Time: ${new Date().toLocaleString()}</p>
+          <hr>
+          <h2>API Status</h2>
+          <p>The Bridge Service API is up and running. You can now use other endpoints for your application.</p>
+          <p>For any issues, please check the logs or contact the system administrator.</p>
+        </div>
+      </body>
+    </html>
+  `);
+});
+
+// Add a catch-all middleware for undefined routes
+app.use((req: Request, res: Response) => {
+  if (req.accepts('html')) {
+    res.redirect('/'); // Redirect to success page for undefined routes
+  } else {
+    res.status(404).json({
+      status: 'error',
+      message: 'Route not found',
+      suggestion: 'Visit the root path (/) for the deployment status page'
+    });
+  }
+});
+
+// Error handling middleware (should be last)
+app.use((err: Error, req: Request, res: Response) => {
+  console.error(err.stack);
+  res.status(500).json({
+    status: 'error',
+    message: 'Something went wrong!',
+    suggestion: 'Please try again later or contact support'
+  });
 });
 
 app.listen(3001, () => {

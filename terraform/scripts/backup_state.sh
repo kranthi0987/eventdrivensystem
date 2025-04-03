@@ -4,8 +4,8 @@ set -e
 # Configuration
 S3_BUCKET="eventdrivensystem-terraform-state"
 BACKUP_DIR="terraform-state-backups"
-TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-BACKUP_FILE="terraform_state_backup_${TIMESTAMP}.tar.gz"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+BACKUP_FILE="terraform_${TIMESTAMP}.tfstate.backup"
 
 # Create backup directory if it doesn't exist
 mkdir -p $BACKUP_DIR
@@ -49,4 +49,19 @@ else
   echo "No Terraform state files found to backup."
   rm -rf $TEMP_DIR
   exit 0
-fi 
+fi
+
+# Get current timestamp
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+BACKUP_FILE="terraform_${TIMESTAMP}.tfstate.backup"
+
+# Create backup of current state
+cp terraform.tfstate "backups/${BACKUP_FILE}"
+
+# Upload to S3 with encryption
+aws s3 cp "backups/${BACKUP_FILE}" \
+  "s3://${TERRAFORM_STATE_BUCKET}/backups/${BACKUP_FILE}" \
+  --sse AES256
+
+# Keep only last 10 backups locally
+cd backups && ls -t | tail -n +11 | xargs -r rm -- 
