@@ -1,9 +1,8 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express, { Request, Response } from 'express';
 import cors from 'cors';
 import eventQueue from './event-queue';
 import { SourceEvent } from './types';
 import { JWTService, jwtConfig } from 'shared-auth';
-import path from 'path';
 
 const jwtService = new JWTService(jwtConfig);
 
