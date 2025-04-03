@@ -150,24 +150,12 @@ jobs:
           echo "Deployment package validated successfully"
 
       - name: Upload deployment package
-        run: |
-          # Create artifacts directory
-          mkdir -p $GITHUB_WORKSPACE/artifacts
-          
-          # Copy deployment package
-          cp ${{ env.ZIP_FILE_NAME }} $GITHUB_WORKSPACE/artifacts/
-          
-          # Upload using artifact commands
-          echo "::group::Upload Artifact"
-          echo "Uploading ${{ env.ZIP_FILE_NAME }}"
-          echo "::set-output name=artifact-path::$GITHUB_WORKSPACE/artifacts/${{ env.ZIP_FILE_NAME }}"
-          
-          # Use GitHub CLI for upload
-          gh artifact upload $GITHUB_WORKSPACE/artifacts/${{ env.ZIP_FILE_NAME }} \
-            --name deployment-package \
-            --retention-days ${{ env.ARTIFACT_RETENTION_DAYS }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: deployment-package
+          path: ${{ env.ZIP_FILE_NAME }}
+          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
+          if-no-files-found: error
 
   build-frontend:
     needs: build-backend
@@ -244,21 +232,18 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Download deployment package
-        run: |
-          echo "::group::Download Artifact"
-          gh artifact download deployment-package --dir .
-          echo "::endgroup::"
-          
-          # Verify download
-          if [ ! -f "${{ env.ZIP_FILE_NAME }}" ]; then
-            echo "Error: Failed to download deployment package"
-            exit 1
-          fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: actions/download-artifact@v3
+        with:
+          name: deployment-package
+          path: .
 
       - name: Verify deployment package
         run: |
+          if [ ! -f "${{ env.ZIP_FILE_NAME }}" ]; then
+            echo "Error: Deployment package not found"
+            ls -la
+            exit 1
+          fi
           echo "Deployment package size: $(ls -lh ${{ env.ZIP_FILE_NAME }} | awk '{print $5}')"
 
       - name: Upload to S3
