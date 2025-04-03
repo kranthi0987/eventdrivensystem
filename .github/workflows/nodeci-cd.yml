@@ -122,6 +122,24 @@ jobs:
             exit 1
           fi
           
+          # Create package.json if it doesn't exist
+          if [ ! -f "package.json" ]; then
+            echo "Creating package.json..."
+            cat > package.json << 'EOF'
+            {
+              "name": "eventdrivensystem",
+              "version": "1.0.0",
+              "scripts": {
+                "start": "node dist/app.js"
+              },
+              "engines": {
+                "node": "22.x"
+              }
+            }
+            EOF
+          fi
+          
+          # Include all necessary files
           zip -r $ZIP_FILE_NAME . \
             -x "*.git*" \
             -x "node_modules/*" \
@@ -130,7 +148,15 @@ jobs:
             -x "*.DS_Store" \
             -x "apps/$FRONTEND_APP_NAME/*" \
             -x "terraform/*" \
-            -i "public/*"  # Explicitly include public directory
+            -i "*.js" \
+            -i "*.json" \
+            -i "dist/*" \
+            -i "public/*" \
+            -i "package.json" \
+            -i "package-lock.json"
+          
+          echo "Deployment package contents:"
+          unzip -l $ZIP_FILE_NAME
 
       - name: Validate deployment package
         run: |
@@ -431,18 +457,32 @@ jobs:
                 "Namespace=aws:elasticbeanstalk:environment:process:default,OptionName=HealthCheckPath,Value=/" \
                 "Namespace=aws:elasticbeanstalk:environment:process:default,OptionName=Port,Value=8081" \
                 "Namespace=aws:elasticbeanstalk:environment:process:default,OptionName=Command,Value=npm start" \
+                "Namespace=aws:elasticbeanstalk:cloudwatch:logs,OptionName=StreamLogs,Value=true" \
+                "Namespace=aws:elasticbeanstalk:cloudwatch:logs,OptionName=DeleteOnTerminate,Value=false" \
+                "Namespace=aws:elasticbeanstalk:cloudwatch:logs,OptionName=RetentionInDays,Value=7" \
+                "Namespace=aws:elasticbeanstalk:environment:proxy:staticfiles,OptionName=/,Value=/public" \
               --version-label "${VERSION_LABEL}"
           else
             echo "Updating existing environment..."
             aws elasticbeanstalk update-environment \
               --application-name "${EB_APPLICATION_NAME}" \
               --environment-name "${EB_ENVIRONMENT_NAME}" \
+              --option-settings \
+                "Namespace=aws:autoscaling:launchconfiguration,OptionName=InstanceType,Value=${INSTANCE_TYPE}" \
+                "Namespace=aws:elasticbeanstalk:application:environment,OptionName=NODE_ENV,Value=production" \
+                "Namespace=aws:elasticbeanstalk:application:environment,OptionName=PORT,Value=8081" \
+                "Namespace=aws:elasticbeanstalk:environment:proxy,OptionName=ProxyServer,Value=nginx" \
+                "Namespace=aws:elasticbeanstalk:environment:process:default,OptionName=HealthCheckPath,Value=/" \
+                "Namespace=aws:elasticbeanstalk:environment:process:default,OptionName=Port,Value=8081" \
+                "Namespace=aws:elasticbeanstalk:environment:process:default,OptionName=Command,Value=npm start" \
+                "Namespace=aws:elasticbeanstalk:cloudwatch:logs,OptionName=StreamLogs,Value=true" \
+                "Namespace=aws:elasticbeanstalk:environment:proxy:staticfiles,OptionName=/,Value=/public" \
               --version-label "${VERSION_LABEL}"
           fi
           
-          # Monitor deployment status
+          # Monitor deployment status with increased timeout
           echo "Monitoring deployment status..."
-          MAX_ATTEMPTS=30
+          MAX_ATTEMPTS=60  # Increased to 10 minutes
           ATTEMPT=0
           SLEEP_TIME=10
           
@@ -459,6 +499,14 @@ jobs:
             
             echo "Status: $STATUS | Health: $HEALTH | Current Version: $CURRENT_VERSION"
             
+            # Get recent events
+            echo "Recent events:"
+            aws elasticbeanstalk describe-events \
+              --environment-name "${EB_ENVIRONMENT_NAME}" \
+              --max-items 5 \
+              --query 'Events[*].{EventDate:EventDate,Severity:Severity,Message:Message}' \
+              --output table
+            
             if [ "$STATUS" = "Ready" ] && [ "$CURRENT_VERSION" = "${VERSION_LABEL}" ]; then
               if [ "$HEALTH" = "Green" ]; then
                 echo "Deployment completed successfully!"
@@ -466,12 +514,18 @@ jobs:
                 echo "Application URL: http://${URL}"
                 exit 0
               elif [ "$HEALTH" = "Red" ]; then
-                echo "Environment is unhealthy. Checking logs..."
+                echo "Environment is unhealthy. Fetching logs..."
                 aws elasticbeanstalk retrieve-environment-info \
                   --environment-name "${EB_ENVIRONMENT_NAME}" \
                   --info-type tail
                 exit 1
               fi
+            elif [ "$STATUS" = "Terminated" ] || [ "$STATUS" = "Terminating" ]; then
+              echo "Environment terminated or terminating. Checking logs..."
+              aws elasticbeanstalk retrieve-environment-info \
+                --environment-name "${EB_ENVIRONMENT_NAME}" \
+                --info-type tail
+              exit 1
             fi
             
             ATTEMPT=$((ATTEMPT + 1))
