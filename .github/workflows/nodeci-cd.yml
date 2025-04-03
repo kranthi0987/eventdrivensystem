@@ -394,129 +394,67 @@ jobs:
             exit 1
           fi
           
-          # Create Elastic Beanstalk application if it doesn't exist
-          if ! aws elasticbeanstalk describe-applications --application-names "${EB_APPLICATION_NAME}" >/dev/null 2>&1; then
-            echo "Creating Elastic Beanstalk application..."
-            aws elasticbeanstalk create-application \
-              --application-name "${EB_APPLICATION_NAME}" \
-              --description "Event Driven System Application"
-          fi
-          
-          # Create application version without waiting for processing
           echo "Creating new application version: ${VERSION_LABEL}"
           aws elasticbeanstalk create-application-version \
             --application-name "${EB_APPLICATION_NAME}" \
             --version-label "${VERSION_LABEL}" \
             --description "Deployment ${VERSION_LABEL}" \
             --source-bundle "S3Bucket=${TERRAFORM_STATE_BUCKET},S3Key=${ZIP_FILE_NAME}" \
-            --auto-create-application
+            --process
           
-          echo "Starting immediate deployment..."
-          
-          # Check if environment exists
-          ENV_EXISTS=$(aws elasticbeanstalk describe-environments \
+          echo "Updating environment with new version..."
+          aws elasticbeanstalk update-environment \
             --application-name "${EB_APPLICATION_NAME}" \
-            --environment-names "${EB_ENVIRONMENT_NAME}" \
-            --include-deleted=false \
-            --query 'length(Environments)' \
-            --output text)
+            --environment-name "${EB_ENVIRONMENT_NAME}" \
+            --version-label "${VERSION_LABEL}"
           
-          if [ "$ENV_EXISTS" = "0" ]; then
-            echo "Creating new environment..."
-            aws elasticbeanstalk create-environment \
-              --application-name "${EB_APPLICATION_NAME}" \
-              --environment-name "${EB_ENVIRONMENT_NAME}" \
-              --solution-stack-name "${SOLUTION_STACK}" \
-              --option-settings \
-                Namespace=aws:autoscaling:launchconfiguration,OptionName=InstanceType,Value="${INSTANCE_TYPE}" \
-                Namespace=aws:elasticbeanstalk:environment,OptionName=EnvironmentType,Value=SingleInstance \
-                Namespace=aws:elasticbeanstalk:application:environment,OptionName=NODE_ENV,Value=production \
-                Namespace=aws:elasticbeanstalk:command,OptionName=BatchSize,Value=100 \
-                Namespace=aws:elasticbeanstalk:command,OptionName=Timeout,Value=600 \
-              --version-label "${VERSION_LABEL}"
-          else
-            echo "Updating existing environment..."
-            aws elasticbeanstalk update-environment \
-              --application-name "${EB_APPLICATION_NAME}" \
-              --environment-name "${EB_ENVIRONMENT_NAME}" \
-              --version-label "${VERSION_LABEL}"
-          fi
+          # Monitor deployment status
+          echo "Monitoring deployment status..."
+          MAX_ATTEMPTS=30
+          ATTEMPT=0
+          SLEEP_TIME=10
           
-          # Monitor deployment
-          echo "Monitoring deployment..."
-          DEPLOY_TIMEOUT=600  # 10 minutes timeout
-          DEPLOY_INTERVAL=30  # Check every 30 seconds
-          ELAPSED=0
-          
-          while [ $ELAPSED -lt $DEPLOY_TIMEOUT ]; do
-            # Get detailed environment information
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
             ENV_INFO=$(aws elasticbeanstalk describe-environments \
               --application-name "${EB_APPLICATION_NAME}" \
               --environment-names "${EB_ENVIRONMENT_NAME}" \
+              --query 'Environments[0]' \
               --output json)
             
-            STATUS=$(echo "$ENV_INFO" | jq -r '.Environments[0].Status')
-            HEALTH=$(echo "$ENV_INFO" | jq -r '.Environments[0].Health')
-            VERSION=$(echo "$ENV_INFO" | jq -r '.Environments[0].VersionLabel')
+            STATUS=$(echo "$ENV_INFO" | jq -r '.Status')
+            HEALTH=$(echo "$ENV_INFO" | jq -r '.Health')
+            CURRENT_VERSION=$(echo "$ENV_INFO" | jq -r '.VersionLabel')
             
-            echo "Current Status: ${STATUS}"
-            echo "Health: ${HEALTH}"
-            echo "Deployed Version: ${VERSION}"
+            echo "Status: $STATUS | Health: $HEALTH | Current Version: $CURRENT_VERSION"
             
-            if [ "$STATUS" = "Ready" ]; then
-              if [ "$VERSION" = "${VERSION_LABEL}" ]; then
-                if [ "$HEALTH" = "Green" ]; then
-                  echo "Deployment completed successfully!"
-                  break
-                elif [ "$HEALTH" = "Red" ]; then
-                  echo "Environment is unhealthy! Fetching logs..."
-                  aws elasticbeanstalk retrieve-environment-info \
-                    --environment-name "${EB_ENVIRONMENT_NAME}" \
-                    --info-type tail
-                  
-                  # Get recent events
-                  echo "Recent events:"
-                  aws elasticbeanstalk describe-events \
-                    --environment-name "${EB_ENVIRONMENT_NAME}" \
-                    --max-items 10
-                  
-                  exit 1
-                fi
+            if [ "$STATUS" = "Ready" ] && [ "$CURRENT_VERSION" = "${VERSION_LABEL}" ]; then
+              if [ "$HEALTH" = "Green" ]; then
+                echo "Deployment completed successfully!"
+                URL=$(echo "$ENV_INFO" | jq -r '.CNAME')
+                echo "Application URL: http://${URL}"
+                exit 0
+              elif [ "$HEALTH" = "Red" ]; then
+                echo "Environment is unhealthy. Checking logs..."
+                aws elasticbeanstalk retrieve-environment-info \
+                  --environment-name "${EB_ENVIRONMENT_NAME}" \
+                  --info-type tail
+                exit 1
               fi
             fi
             
-            if [ $ELAPSED -ge $DEPLOY_TIMEOUT ]; then
-              echo "Deployment timed out after ${DEPLOY_TIMEOUT} seconds"
-              exit 1
+            ATTEMPT=$((ATTEMPT + 1))
+            if [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
+              echo "Waiting ${SLEEP_TIME} seconds before next check... (Attempt $ATTEMPT/$MAX_ATTEMPTS)"
+              sleep $SLEEP_TIME
             fi
-            
-            echo "Deployment in progress... waiting ${DEPLOY_INTERVAL} seconds"
-            sleep $DEPLOY_INTERVAL
-            ELAPSED=$((ELAPSED + DEPLOY_INTERVAL))
           done
           
-          # Get final environment URL and status
-          FINAL_INFO=$(aws elasticbeanstalk describe-environments \
-            --application-name "${EB_APPLICATION_NAME}" \
-            --environment-names "${EB_ENVIRONMENT_NAME}" \
-            --output json)
-          
-          URL=$(echo "$FINAL_INFO" | jq -r '.Environments[0].CNAME')
-          FINAL_HEALTH=$(echo "$FINAL_INFO" | jq -r '.Environments[0].Health')
-          
-          echo "Deployment completed!"
-          echo "Application URL: http://${URL}"
-          echo "Final Health: ${FINAL_HEALTH}"
-          
-          # Verify the deployment
-          echo "Verifying deployment..."
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://${URL}")
-          
-          if [ "$HTTP_STATUS" = "200" ]; then
-            echo "Application is responding successfully!"
-          else
-            echo "Warning: Application returned status code ${HTTP_STATUS}"
-          fi
+          echo "Deployment timed out after $((MAX_ATTEMPTS * SLEEP_TIME)) seconds"
+          echo "Final environment status:"
+          aws elasticbeanstalk describe-events \
+            --environment-name "${EB_ENVIRONMENT_NAME}" \
+            --max-items 10
+          exit 1
           EOF
           
           chmod +x scripts/deploy_to_eb.sh
@@ -536,27 +474,6 @@ jobs:
           EB_ENVIRONMENT_NAME: ${{ env.EB_ENVIRONMENT_NAME }}
           TERRAFORM_STATE_BUCKET: ${{ env.TERRAFORM_STATE_BUCKET }}
           ZIP_FILE_NAME: ${{ env.ZIP_FILE_NAME }}
-          SOLUTION_STACK: ${{ env.SOLUTION_STACK }}
-          INSTANCE_TYPE: ${{ env.INSTANCE_TYPE }}
-
-      - name: Check Deployment Status
-        run: |
-          echo "Waiting for deployment to complete..."
-          sleep 30
-          STATUS=$(aws elasticbeanstalk describe-environments --environment-names ${{ env.EB_ENVIRONMENT_NAME }} --query 'Environments[0].Status' --output text)
-          HEALTH=$(aws elasticbeanstalk describe-environments --environment-names ${{ env.EB_ENVIRONMENT_NAME }} --query 'Environments[0].Health' --output text)
-          echo "Environment Status: $STATUS"
-          echo "Environment Health: $HEALTH"
-          
-          if [ "$STATUS" != "Ready" ] || [ "$HEALTH" != "Green" ]; then
-            echo "Deployment is still in progress or has issues. Checking logs..."
-            aws elasticbeanstalk retrieve-environment-info --environment-name ${{ env.EB_ENVIRONMENT_NAME }} --info-type tail
-            exit 1
-          fi
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION: ${{ env.AWS_REGION }}
 
   check-deployment-status:
     needs: deploy-infrastructure
