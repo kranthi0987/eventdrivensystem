@@ -75,15 +75,18 @@ jobs:
 
       - name: Create S3 Bucket if not exists
         run: |
-            if ! aws s3 ls "s3://${{ env.S3_BUCKET_NAME }}" 2>&1 | grep -q 'NoSuchBucket'; then
-              aws s3 mb "s3://${{ env.S3_BUCKET_NAME }}" --region ${{ env.AWS_REGION }}
-              aws s3api put-public-access-block \
-                --bucket ${{ env.S3_BUCKET_NAME }} \
-                --public-access-block-configuration "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false"
-            
+            if ! aws s3 ls "s3://$S3_BUCKET_NAME" 2>&1 | grep -q 'NoSuchBucket'; then
+              echo "Syncing files to S3 bucket $S3_BUCKET_NAME"
+              aws s3 sync apps/event-monitor/dist s3://$S3_BUCKET_NAME --delete
+              aws s3 cp apps/event-monitor/dist/index.html s3://$S3_BUCKET_NAME/index.html --cache-control "no-cache,no-store,must-revalidate"
+              echo "Files synced successfully"
+            else
+              echo "Error: S3 bucket $S3_BUCKET_NAME does not exist. Creating it now..."
+              aws s3 mb "s3://$S3_BUCKET_NAME" --region ${{ env.AWS_REGION }}
+              
               # Configure bucket policy for public read access
               aws s3api put-bucket-policy \
-                --bucket ${{ env.S3_BUCKET_NAME }} \
+                --bucket $S3_BUCKET_NAME \
                 --policy '{
                   "Version": "2012-10-17",
                   "Statement": [
@@ -91,21 +94,21 @@ jobs:
                       "Effect": "Allow",
                       "Principal": "*",
                       "Action": "s3:GetObject",
-                      "Resource": "arn:aws:s3:::'${{ env.S3_BUCKET_NAME }}'/*"
+                      "Resource": "arn:aws:s3:::'$S3_BUCKET_NAME'/*"
                     }
                   ]
                 }'
-            
+              
               # Enable static website hosting
-              aws s3 website "s3://${{ env.S3_BUCKET_NAME }}" \
+              aws s3 website "s3://$S3_BUCKET_NAME" \
                 --index-document index.html \
                 --error-document index.html
+                
+              echo "Bucket created, now syncing files..."
+              aws s3 sync apps/event-monitor/dist s3://$S3_BUCKET_NAME --delete
+              aws s3 cp apps/event-monitor/dist/index.html s3://$S3_BUCKET_NAME/index.html --cache-control "no-cache,no-store,must-revalidate"
+              echo "Files synced successfully"
             fi
-      - name: Deploy to S3
-        run: |
-          aws s3 sync apps/event-monitor/dist s3://$S3_BUCKET_NAME --delete
-          aws s3 cp apps/event-monitor/dist/index.html s3://$S3_BUCKET_NAME/index.html --cache-control "no-cache,no-store,must-revalidate"
-
       - name: Invalidate CloudFront cache
         run: |
           aws cloudfront create-invalidation --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} --paths "/*"
