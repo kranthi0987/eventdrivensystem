@@ -388,6 +388,15 @@ jobs:
           # Get timestamp for version label
           VERSION_LABEL="v$(date +%Y%m%d-%H%M%S)"
           
+          # Function to check version status
+          check_version_status() {
+            aws elasticbeanstalk describe-application-versions \
+              --application-name "${EB_APPLICATION_NAME}" \
+              --version-labels "${VERSION_LABEL}" \
+              --query 'ApplicationVersions[0].Status' \
+              --output text
+          }
+          
           # Create Elastic Beanstalk application if it doesn't exist
           if ! aws elasticbeanstalk describe-applications --application-names "${EB_APPLICATION_NAME}" >/dev/null 2>&1; then
             echo "Creating Elastic Beanstalk application..."
@@ -407,9 +416,20 @@ jobs:
           
           # Wait for version to be processed
           echo "Waiting for application version to be processed..."
-          aws elasticbeanstalk wait application-version-available \
-            --application-name "${EB_APPLICATION_NAME}" \
-            --version-label "${VERSION_LABEL}"
+          while true; do
+            STATUS=$(check_version_status)
+            echo "Version status: ${STATUS}"
+            
+            if [ "${STATUS}" = "PROCESSED" ]; then
+              break
+            elif [ "${STATUS}" = "FAILED" ]; then
+              echo "Version processing failed!"
+              exit 1
+            fi
+            
+            echo "Waiting for version to be processed..."
+            sleep 10
+          done
           
           # Check if environment exists
           if ! aws elasticbeanstalk describe-environments \
@@ -423,7 +443,9 @@ jobs:
               --environment-name "${EB_ENVIRONMENT_NAME}" \
               --solution-stack-name "${SOLUTION_STACK}" \
               --option-settings \
-                Namespace=aws:autoscaling:launchconfiguration,OptionName=InstanceType,Value="${INSTANCE_TYPE}" \
+                "Namespace=aws:autoscaling:launchconfiguration,OptionName=InstanceType,Value=${INSTANCE_TYPE}" \
+                "Namespace=aws:elasticbeanstalk:environment,OptionName=EnvironmentType,Value=SingleInstance" \
+                "Namespace=aws:elasticbeanstalk:application:environment,OptionName=NODE_ENV,Value=production" \
               --version-label "${VERSION_LABEL}"
           else
             echo "Updating existing environment..."
@@ -433,13 +455,50 @@ jobs:
               --version-label "${VERSION_LABEL}"
           fi
           
+          # Function to check environment status
+          check_environment_status() {
+            aws elasticbeanstalk describe-environments \
+              --application-name "${EB_APPLICATION_NAME}" \
+              --environment-names "${EB_ENVIRONMENT_NAME}" \
+              --query 'Environments[0].[Status,Health]' \
+              --output text
+          }
+          
           # Wait for environment to be ready
           echo "Waiting for environment to be ready..."
-          aws elasticbeanstalk wait environment-updated \
-            --application-name "${EB_APPLICATION_NAME}" \
-            --environment-names "${EB_ENVIRONMENT_NAME}"
+          TIMEOUT=600  # 10 minutes timeout
+          INTERVAL=30  # Check every 30 seconds
+          ELAPSED=0
           
-          # Get environment status
+          while [ $ELAPSED -lt $TIMEOUT ]; do
+            ENV_STATUS=$(check_environment_status)
+            STATUS=$(echo "$ENV_STATUS" | cut -f1)
+            HEALTH=$(echo "$ENV_STATUS" | cut -f2)
+            
+            echo "Status: ${STATUS}, Health: ${HEALTH}"
+            
+            if [ "$STATUS" = "Ready" ]; then
+              if [ "$HEALTH" = "Green" ]; then
+                break
+              elif [ "$HEALTH" = "Red" ]; then
+                echo "Environment is unhealthy!"
+                aws elasticbeanstalk retrieve-environment-info \
+                  --environment-name "${EB_ENVIRONMENT_NAME}" \
+                  --info-type tail
+                exit 1
+              fi
+            fi
+            
+            sleep $INTERVAL
+            ELAPSED=$((ELAPSED + INTERVAL))
+            
+            if [ $ELAPSED -ge $TIMEOUT ]; then
+              echo "Deployment timed out after ${TIMEOUT} seconds"
+              exit 1
+            fi
+          done
+          
+          # Get final environment info
           ENV_INFO=$(aws elasticbeanstalk describe-environments \
             --application-name "${EB_APPLICATION_NAME}" \
             --environment-names "${EB_ENVIRONMENT_NAME}" \
@@ -456,7 +515,10 @@ jobs:
           echo "URL: http://${URL}"
           
           if [ "$STATUS" != "Ready" ] || [ "$HEALTH" != "Green" ]; then
-            echo "Deployment may have issues. Please check the Elastic Beanstalk console."
+            echo "Deployment has issues. Checking logs..."
+            aws elasticbeanstalk retrieve-environment-info \
+              --environment-name "${EB_ENVIRONMENT_NAME}" \
+              --info-type tail
             exit 1
           fi
           EOF
