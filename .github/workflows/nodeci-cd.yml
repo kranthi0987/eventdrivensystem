@@ -54,20 +54,34 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Setup deployment files
+      - name: Create default success page
         run: |
-          mkdir -p public .ebextensions .platform/nginx/conf.d
+          # Create public directory if it doesn't exist
+          mkdir -p public
           
-          # Create success page
+          # Create the index.html file
           cat > public/index.html << 'EOF'
           <!DOCTYPE html>
           <html>
             <head>
               <title>Deployment Success</title>
               <style>
-                body { font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; text-align: center; }
-                .container { max-width: 800px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 5px; }
-                .success { color: #28a745; }
+                body {
+                  font-family: Arial, sans-serif;
+                  margin: 40px;
+                  line-height: 1.6;
+                  text-align: center;
+                }
+                .container {
+                  max-width: 800px;
+                  margin: 0 auto;
+                  padding: 20px;
+                  border: 1px solid #ddd;
+                  border-radius: 5px;
+                }
+                .success {
+                  color: #28a745;
+                }
               </style>
             </head>
             <body>
@@ -81,119 +95,91 @@ jobs:
             </body>
           </html>
           EOF
-          
-          # Create package.json if not exists
-          if [ ! -f "package.json" ]; then
-            cat > package.json << 'EOF'
-            {
-              "name": "eventdrivensystem",
-              "version": "1.0.0",
-              "scripts": {
-                "start": "node dist/app.js"
-              },
-              "engines": {
-                "node": "22.x"
-              }
-            }
-            EOF
+
+      - name: Verify public directory
+        run: |
+          if [ ! -d "public" ]; then
+            echo "Error: public directory was not created"
+            exit 1
           fi
           
-          # Create Procfile
-          echo "web: npm start" > Procfile
+          if [ ! -f "public/index.html" ]; then
+            echo "Error: index.html was not created"
+            exit 1
+          fi
           
-          # Create .npmrc
-          echo "engine-strict=true" > .npmrc
+          echo "Contents of public directory:"
+          ls -la public/
           
-          # Create EB config
-          cat > .ebextensions/00_nginx.config << 'EOF'
-          option_settings:
-            aws:elasticbeanstalk:environment:proxy:staticfiles:
-              /public: /public
-            aws:elasticbeanstalk:environment:process:default:
-              Command: "npm start"
-              Port: "8081"
-            aws:elasticbeanstalk:application:environment:
-              NODE_ENV: "production"
-              PORT: "8081"
-          EOF
-          
-          # Create Nginx config
-          cat > .platform/nginx/conf.d/proxy.conf << 'EOF'
-          upstream nodejs {
-            server 127.0.0.1:8081;
-            keepalive 256;
-          }
-          
-          server {
-            listen 80;
-            server_name localhost;
-            
-            gzip on;
-            gzip_comp_level 4;
-            gzip_types text/plain text/css application/json application/javascript application/x-javascript text/xml application/xml application/xml+rss text/javascript;
-            
-            location / {
-              proxy_pass http://nodejs;
-              proxy_http_version 1.1;
-              proxy_set_header Upgrade $http_upgrade;
-              proxy_set_header Connection 'upgrade';
-              proxy_set_header Host $host;
-              proxy_cache_bypass $http_upgrade;
-              proxy_set_header X-Real-IP $remote_addr;
-              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-              proxy_set_header X-Forwarded-Proto $scheme;
-              proxy_buffer_size 128k;
-              proxy_buffers 4 256k;
-              proxy_busy_buffers_size 256k;
-            }
-            
-            location /public {
-              alias /var/app/current/public;
-              expires 1h;
-              add_header Cache-Control public;
-              add_header X-Frame-Options SAMEORIGIN;
-              add_header X-XSS-Protection "1; mode=block";
-              add_header X-Content-Type-Options nosniff;
-            }
-            
-            location /health {
-              access_log off;
-              return 200 'OK';
-              add_header Content-Type text/plain;
-            }
-          }
-          EOF
+          echo "Contents of index.html:"
+          cat public/index.html
 
-      - name: Create deployment package
+      - name: Zip deployment package
         run: |
-          zip -r ${{ env.ZIP_FILE_NAME }} \
-            package.json \
-            package-lock.json \
-            Procfile \
-            .npmrc \
-            .ebextensions/ \
-            .platform/ \
-            dist/ \
-            public/ \
-            node_modules/ \
-            --exclude "*.git*" "*.env*" ".github/*" ".idea/*" "*.DS_Store" "apps/*" "terraform/*"
+          # Ensure public directory is included
+          if [ ! -d "public" ]; then
+            echo "Error: public directory not found"
+            exit 1
+          fi
+          
+          zip -r $ZIP_FILE_NAME . \
+            -x "*.git*" \
+            -x "node_modules/*" \
+            -x ".github/*" \
+            -x ".idea/*" \
+            -x "*.DS_Store" \
+            -x "apps/$FRONTEND_APP_NAME/*" \
+            -x "terraform/*" \
+            -i "public/*"  # Explicitly include public directory
 
-      - name: Upload artifact
+      - name: Validate deployment package
+        run: |
+          if [ ! -f "${{ env.ZIP_FILE_NAME }}" ]; then
+            echo "Error: Failed to create deployment package"
+            exit 1
+          fi
+          
+          echo "Checking zip contents..."
+          if ! unzip -l "${{ env.ZIP_FILE_NAME }}" | grep -q "public/index.html"; then
+            echo "Error: public/index.html not found in zip"
+            echo "Zip contents:"
+            unzip -l "${{ env.ZIP_FILE_NAME }}"
+            exit 1
+          fi
+          
+          echo "Deployment package validated successfully"
+
+      - name: Upload deployment package
         uses: actions/upload-artifact@v4
         with:
           name: deployment-package
           path: ${{ env.ZIP_FILE_NAME }}
           retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
           if-no-files-found: error
+          compression-level: 9
 
-  deploy:
+  build-frontend:
     needs: build-backend
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    
     steps:
       - uses: actions/checkout@v4
-      
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          cd apps/event-monitor
+          npm ci
+
+      - name: Build frontend
+        run: |
+          cd apps/event-monitor
+          npm run build
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -201,81 +187,481 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Download artifact
+      - name: Create S3 Bucket if not exists
+        run: |
+            if ! aws s3 ls "s3://$S3_BUCKET_NAME" 2>&1 | grep -q 'NoSuchBucket'; then
+              echo "Syncing files to S3 bucket $S3_BUCKET_NAME"
+              aws s3 sync apps/event-monitor/dist s3://$S3_BUCKET_NAME --delete
+              aws s3 cp apps/event-monitor/dist/index.html s3://$S3_BUCKET_NAME/index.html --cache-control "no-cache,no-store,must-revalidate"
+              echo "Files synced successfully"
+            else
+              echo "Error: S3 bucket $S3_BUCKET_NAME does not exist. Creating it now..."
+              aws s3 mb "s3://$S3_BUCKET_NAME" --region ${{ env.AWS_REGION }}
+              
+              # Configure bucket policy for public read access
+              aws s3api put-bucket-policy \
+                --bucket $S3_BUCKET_NAME \
+                --policy '{
+                  "Version": "2012-10-17",
+                  "Statement": [
+                    {
+                      "Effect": "Allow",
+                      "Principal": "*",
+                      "Action": "s3:GetObject",
+                      "Resource": "arn:aws:s3:::'$S3_BUCKET_NAME'/*"
+                    }
+                  ]
+                }'
+              
+              # Enable static website hosting
+              aws s3 website "s3://$S3_BUCKET_NAME" \
+                --index-document index.html \
+                --error-document index.html
+                
+              echo "Bucket created, now syncing files..."
+              aws s3 sync apps/event-monitor/dist s3://$S3_BUCKET_NAME --delete
+              aws s3 cp apps/event-monitor/dist/index.html s3://$S3_BUCKET_NAME/index.html --cache-control "no-cache,no-store,must-revalidate"
+              echo "Files synced successfully"
+            fi
+
+  deploy-infrastructure:
+    needs: [build-backend, build-frontend]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download deployment package
         uses: actions/download-artifact@v4
         with:
           name: deployment-package
           path: .
+          merge-multiple: false
+
+      - name: Verify deployment package
+        run: |
+          if [ ! -f "${{ env.ZIP_FILE_NAME }}" ]; then
+            echo "Error: Deployment package not found"
+            echo "Current directory contents:"
+            ls -la
+            exit 1
+          fi
+          echo "Deployment package size: $(ls -lh ${{ env.ZIP_FILE_NAME }} | awk '{print $5}')"
+
+      - name: Upload deployment package to S3
+        run: |
+          # Create deployments directory in Terraform state bucket
+          aws s3api head-bucket --bucket "${TERRAFORM_STATE_BUCKET}" 2>/dev/null || \
+            aws s3 mb "s3://${TERRAFORM_STATE_BUCKET}" --region ${AWS_REGION}
+          
+          # Upload deployment package
+          aws s3 cp ${{ env.ZIP_FILE_NAME }} \
+            "s3://${TERRAFORM_STATE_BUCKET}/${{ env.ZIP_FILE_NAME }}" \
+            --sse AES256
+          
+          echo "Deployment package uploaded to s3://${TERRAFORM_STATE_BUCKET}/${{ env.ZIP_FILE_NAME }}"
+          
+          # Verify upload
+          if ! aws s3 ls "s3://${TERRAFORM_STATE_BUCKET}/${{ env.ZIP_FILE_NAME }}"; then
+            echo "Error: Failed to upload deployment package to S3"
+            exit 1
+          fi
+
+      - name: Create Terraform State Bucket
+        run: |
+          if ! aws s3 ls "s3://$TERRAFORM_STATE_BUCKET" 2>&1 | grep -q 'NoSuchBucket'; then
+            echo "Terraform state bucket already exists"
+          else
+            echo "Creating Terraform state bucket..."
+            aws s3 mb "s3://$TERRAFORM_STATE_BUCKET" --region ${{ env.AWS_REGION }}
+            aws s3api put-bucket-versioning --bucket $TERRAFORM_STATE_BUCKET --versioning-configuration Status=Enabled
+            aws s3api put-bucket-encryption --bucket $TERRAFORM_STATE_BUCKET --server-side-encryption-configuration '{
+              "Rules": [
+                {
+                  "ApplyServerSideEncryptionByDefault": {
+                    "SSEAlgorithm": "AES256"
+                  }
+                }
+              ]
+            }'
+            aws s3api put-public-access-block --bucket $TERRAFORM_STATE_BUCKET --public-access-block-configuration "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
+            echo "Terraform state bucket created successfully"
+          fi
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.5.0"
+
+      - name: Terraform Init
+        working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
+        run: terraform init
+
+      - name: Terraform Plan
+        working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
+        run: terraform plan -var="frontend_bucket_name=${{ env.S3_BUCKET_NAME }}"
+
+      - name: Terraform Apply
+        run: |
+          cd terraform
+          terraform apply -auto-approve \
+            -var="frontend_bucket_name=${{ env.S3_BUCKET_NAME }}"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+
+      - name: Backup Terraform State
+        run: |
+          # Create necessary directories
+          mkdir -p terraform/backups
+          mkdir -p terraform/terraform-state-backups
+          
+          cd terraform
+          
+          # Create backup script if it doesn't exist
+          cat > scripts/backup_state.sh << 'EOF'
+          #!/bin/bash
+          
+          # Create directories if they don't exist
+          mkdir -p backups
+          mkdir -p terraform-state-backups
+          
+          # Get current timestamp
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          BACKUP_FILE="terraform_${TIMESTAMP}.tfstate.backup"
+          
+          # Create backup of current state
+          cp terraform.tfstate "backups/${BACKUP_FILE}"
+          
+          # Create backup directory in S3 if it doesn't exist
+          aws s3api head-bucket --bucket "${TERRAFORM_STATE_BUCKET}" 2>/dev/null || \
+            aws s3 mb "s3://${TERRAFORM_STATE_BUCKET}"
+          
+          # Upload to S3 with encryption
+          aws s3 cp "backups/${BACKUP_FILE}" \
+            "s3://${TERRAFORM_STATE_BUCKET}/terraform-state-backups/${BACKUP_FILE}" \
+            --sse AES256
+          
+          echo "Backup completed successfully!"
+          
+          # Cleanup old local backups (keep last 5)
+          cd backups && ls -t | tail -n +6 | xargs -r rm --
+          
+          # List current backups
+          echo "Current local backups:"
+          ls -la backups/
+          
+          echo "Current S3 backups:"
+          aws s3 ls "s3://${TERRAFORM_STATE_BUCKET}/terraform-state-backups/"
+          EOF
+          
+          # Make script executable
+          chmod +x scripts/backup_state.sh
+          
+          # Run backup script
+          ./scripts/backup_state.sh
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+          TERRAFORM_STATE_BUCKET: ${{ env.TERRAFORM_STATE_BUCKET }}
+
+      - name: Create EB deployment script
+        run: |
+          cd terraform
+          mkdir -p scripts
+          cat > scripts/deploy_to_eb.sh << 'EOF'
+          #!/bin/bash
+          
+          # Exit on any error
+          set -e
+          
+          # Get timestamp for version label
+          VERSION_LABEL="v$(date +%Y%m%d-%H%M%S)"
+          
+          echo "Verifying S3 source bundle..."
+          if ! aws s3 ls "s3://${TERRAFORM_STATE_BUCKET}/${ZIP_FILE_NAME}"; then
+            echo "Error: Source bundle not found in S3!"
+            exit 1
+          fi
+          
+          # Create application if it doesn't exist
+          if ! aws elasticbeanstalk describe-applications --application-names "${EB_APPLICATION_NAME}" >/dev/null 2>&1; then
+            echo "Creating Elastic Beanstalk application..."
+            aws elasticbeanstalk create-application \
+              --application-name "${EB_APPLICATION_NAME}" \
+              --description "Event Driven System Application"
+          fi
+          
+          echo "Creating new application version: ${VERSION_LABEL}"
+          aws elasticbeanstalk create-application-version \
+            --application-name "${EB_APPLICATION_NAME}" \
+            --version-label "${VERSION_LABEL}" \
+            --description "Deployment ${VERSION_LABEL}" \
+            --source-bundle "S3Bucket=${TERRAFORM_STATE_BUCKET},S3Key=${ZIP_FILE_NAME}" \
+            --process
+          
+          # Define environment configuration
+          CONFIG_FILE="env_config.json"
+          cat > $CONFIG_FILE << 'EOFCONFIG'
+          [
+            {
+              "Namespace": "aws:autoscaling:launchconfiguration",
+              "OptionName": "IamInstanceProfile",
+              "Value": "aws-elasticbeanstalk-ec2-role"
+            },
+            {
+              "Namespace": "aws:autoscaling:launchconfiguration",
+              "OptionName": "InstanceType",
+              "Value": "'${INSTANCE_TYPE}'"
+            },
+            {
+              "Namespace": "aws:elasticbeanstalk:environment",
+              "OptionName": "EnvironmentType",
+              "Value": "SingleInstance"
+            },
+            {
+              "Namespace": "aws:elasticbeanstalk:environment",
+              "OptionName": "ServiceRole",
+              "Value": "aws-elasticbeanstalk-service-role"
+            },
+            {
+              "Namespace": "aws:elasticbeanstalk:application:environment",
+              "OptionName": "NODE_ENV",
+              "Value": "production"
+            },
+            {
+              "Namespace": "aws:elasticbeanstalk:application:environment",
+              "OptionName": "PORT",
+              "Value": "8081"
+            },
+            {
+              "Namespace": "aws:elasticbeanstalk:environment:proxy",
+              "OptionName": "ProxyServer",
+              "Value": "nginx"
+            },
+            {
+              "Namespace": "aws:elasticbeanstalk:environment:process:default",
+              "OptionName": "HealthCheckPath",
+              "Value": "/"
+            },
+            {
+              "Namespace": "aws:elasticbeanstalk:environment:process:default",
+              "OptionName": "Port",
+              "Value": "8081"
+            },
+            {
+              "Namespace": "aws:elasticbeanstalk:environment:process:default",
+              "OptionName": "Command",
+              "Value": "npm start"
+            },
+            {
+              "Namespace": "aws:elasticbeanstalk:cloudwatch:logs",
+              "OptionName": "StreamLogs",
+              "Value": "true"
+            },
+            {
+              "Namespace": "aws:elasticbeanstalk:cloudwatch:logs",
+              "OptionName": "DeleteOnTerminate",
+              "Value": "false"
+            },
+            {
+              "Namespace": "aws:elasticbeanstalk:cloudwatch:logs",
+              "OptionName": "RetentionInDays",
+              "Value": "7"
+            },
+            {
+              "Namespace": "aws:autoscaling:updatepolicy:rollingupdate",
+              "OptionName": "RollingUpdateEnabled",
+              "Value": "true"
+            },
+            {
+              "Namespace": "aws:elasticbeanstalk:command",
+              "OptionName": "DeploymentPolicy",
+              "Value": "AllAtOnce"
+            },
+            {
+              "Namespace": "aws:elasticbeanstalk:command",
+              "OptionName": "Timeout",
+              "Value": "600"
+            }
+          ]
+          EOFCONFIG
+          
+          # Check if environment exists
+          if ! aws elasticbeanstalk describe-environments \
+            --application-name "${EB_APPLICATION_NAME}" \
+            --environment-names "${EB_ENVIRONMENT_NAME}" \
+            --include-deleted=false \
+            --query 'Environments[0]' >/dev/null 2>&1; then
+            
+            echo "Creating new environment..."
+            aws elasticbeanstalk create-environment \
+              --application-name "${EB_APPLICATION_NAME}" \
+              --environment-name "${EB_ENVIRONMENT_NAME}" \
+              --solution-stack-name "${SOLUTION_STACK}" \
+              --option-settings file://$CONFIG_FILE \
+              --version-label "${VERSION_LABEL}"
+          else
+            echo "Updating existing environment..."
+            aws elasticbeanstalk update-environment \
+              --application-name "${EB_APPLICATION_NAME}" \
+              --environment-name "${EB_ENVIRONMENT_NAME}" \
+              --option-settings file://$CONFIG_FILE \
+              --version-label "${VERSION_LABEL}"
+          fi
+          
+          # Monitor deployment status with enhanced error handling
+          echo "Monitoring deployment status..."
+          MAX_ATTEMPTS=60  # Increased to 10 minutes
+          ATTEMPT=0
+          SLEEP_TIME=10
+          
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ENV_INFO=$(aws elasticbeanstalk describe-environments \
+              --application-name "${EB_APPLICATION_NAME}" \
+              --environment-names "${EB_ENVIRONMENT_NAME}" \
+              --query 'Environments[0]' \
+              --output json)
+            
+            STATUS=$(echo "$ENV_INFO" | jq -r '.Status')
+            HEALTH=$(echo "$ENV_INFO" | jq -r '.Health')
+            CURRENT_VERSION=$(echo "$ENV_INFO" | jq -r '.VersionLabel')
+            
+            echo "Status: $STATUS | Health: $HEALTH | Current Version: $CURRENT_VERSION"
+            
+            # Check for terminal failure states
+            if [ "$STATUS" = "Terminated" ] || [ "$STATUS" = "Terminating" ]; then
+              echo "Environment terminated unexpectedly. Checking recent events..."
+              aws elasticbeanstalk describe-events \
+                --environment-name "${EB_ENVIRONMENT_NAME}" \
+                --max-items 20 \
+                --query 'Events[*].{Timestamp:EventDate,Message:Message}' \
+                --output table
+              
+              echo "Fetching logs..."
+              aws elasticbeanstalk retrieve-environment-info \
+                --environment-name "${EB_ENVIRONMENT_NAME}" \
+                --info-type tail
+              
+              exit 1
+            fi
+            
+            if [ "$STATUS" = "Ready" ] && [ "$CURRENT_VERSION" = "${VERSION_LABEL}" ]; then
+              if [ "$HEALTH" = "Green" ]; then
+                echo "Deployment completed successfully!"
+                URL=$(echo "$ENV_INFO" | jq -r '.CNAME')
+                echo "Application URL: http://${URL}"
+                
+                # Verify application is responding
+                echo "Verifying application response..."
+                if curl -s -f "http://${URL}"; then
+                  echo "Application is responding successfully!"
+                  exit 0
+                else
+                  echo "Warning: Application is not responding properly"
+                  exit 1
+                fi
+              elif [ "$HEALTH" = "Red" ]; then
+                echo "Environment is unhealthy. Checking logs..."
+                aws elasticbeanstalk retrieve-environment-info \
+                  --environment-name "${EB_ENVIRONMENT_NAME}" \
+                  --info-type tail
+                exit 1
+              fi
+            fi
+            
+            ATTEMPT=$((ATTEMPT + 1))
+            if [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
+              echo "Waiting ${SLEEP_TIME} seconds before next check... (Attempt $ATTEMPT/$MAX_ATTEMPTS)"
+              sleep $SLEEP_TIME
+            fi
+          done
+          
+          echo "Deployment timed out after $((MAX_ATTEMPTS * SLEEP_TIME)) seconds"
+          echo "Final environment status:"
+          aws elasticbeanstalk describe-events \
+            --environment-name "${EB_ENVIRONMENT_NAME}" \
+            --max-items 20 \
+            --query 'Events[*].{Timestamp:EventDate,Message:Message}' \
+            --output table
+          exit 1
+          EOF
+          
+          chmod +x scripts/deploy_to_eb.sh
 
       - name: Install jq
         run: sudo apt-get install -y jq
 
       - name: Deploy to Elastic Beanstalk
         run: |
-          # Upload to S3
-          aws s3 cp ${{ env.ZIP_FILE_NAME }} \
-            "s3://${{ env.TERRAFORM_STATE_BUCKET }}/${{ env.ZIP_FILE_NAME }}" \
-            --sse AES256
+          cd terraform
+          ./scripts/deploy_to_eb.sh
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+          EB_APPLICATION_NAME: ${{ env.EB_APPLICATION_NAME }}
+          EB_ENVIRONMENT_NAME: ${{ env.EB_ENVIRONMENT_NAME }}
+          TERRAFORM_STATE_BUCKET: ${{ env.TERRAFORM_STATE_BUCKET }}
+          ZIP_FILE_NAME: ${{ env.ZIP_FILE_NAME }}
+          SOLUTION_STACK: ${{ env.SOLUTION_STACK }}
+          INSTANCE_TYPE: ${{ env.INSTANCE_TYPE }}
+
+  check-deployment-status:
+    needs: deploy-infrastructure
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get Deployment Status and URLs
+        run: |
+          echo "Checking Elastic Beanstalk Environment Status..."
           
-          # Create version label
-          VERSION_LABEL="v$(date +%Y%m%d-%H%M%S)"
+          STATUS=$(aws elasticbeanstalk describe-environments \
+            --environment-names ${{ env.EB_ENVIRONMENT_NAME }} \
+            --query 'Environments[0].Status' \
+            --output text)
           
-          # Create application version
-          aws elasticbeanstalk create-application-version \
-            --application-name "${{ env.EB_APPLICATION_NAME }}" \
-            --version-label "$VERSION_LABEL" \
-            --source-bundle "S3Bucket=${{ env.TERRAFORM_STATE_BUCKET }},S3Key=${{ env.ZIP_FILE_NAME }}" \
-            --process
+          HEALTH=$(aws elasticbeanstalk describe-environments \
+            --environment-names ${{ env.EB_ENVIRONMENT_NAME }} \
+            --query 'Environments[0].Health' \
+            --output text)
+            
+          URL=$(aws elasticbeanstalk describe-environments \
+            --environment-names ${{ env.EB_ENVIRONMENT_NAME }} \
+            --query 'Environments[0].CNAME' \
+            --output text)
           
-          # Wait for processing
-          while true; do
-            STATUS=$(aws elasticbeanstalk describe-application-versions \
-              --application-name "${{ env.EB_APPLICATION_NAME }}" \
-              --version-labels "$VERSION_LABEL" \
-              --query 'ApplicationVersions[0].Status' \
-              --output text)
-            
-            echo "Version status: $STATUS"
-            if [ "$STATUS" = "PROCESSED" ]; then
-              break
-            elif [ "$STATUS" = "FAILED" ]; then
-              exit 1
-            fi
-            sleep 10
-          done
+          echo "Environment Status: $STATUS"
+          echo "Environment Health: $HEALTH"
+          echo "Application URL: http://$URL"
           
-          # Update environment
-          aws elasticbeanstalk update-environment \
-            --environment-name "${{ env.EB_ENVIRONMENT_NAME }}" \
-            --version-label "$VERSION_LABEL"
+          # Get frontend URL
+          FRONTEND_URL=$(aws s3 website s3://${{ env.S3_BUCKET_NAME }} --get | grep -o 'http://.*')
+          echo "Frontend URL: $FRONTEND_URL"
           
-          # Monitor deployment
-          TIMEOUT=600
-          START_TIME=$(date +%s)
-          
-          while true; do
-            ENV_INFO=$(aws elasticbeanstalk describe-environments \
-              --environment-names "${{ env.EB_ENVIRONMENT_NAME }}" \
-              --query 'Environments[0]' \
-              --output json)
-            
-            STATUS=$(echo "$ENV_INFO" | jq -r '.Status')
-            HEALTH=$(echo "$ENV_INFO" | jq -r '.Health')
-            
-            echo "Status: $STATUS | Health: $HEALTH"
-            
-            if [ "$STATUS" = "Ready" ] && [ "$HEALTH" = "Green" ]; then
-              echo "Deployment successful!"
-              URL=$(echo "$ENV_INFO" | jq -r '.CNAME')
-              echo "Application URL: http://$URL"
-              exit 0
-            fi
-            
-            CURRENT_TIME=$(date +%s)
-            if [ $((CURRENT_TIME - START_TIME)) -ge $TIMEOUT ]; then
-              echo "Deployment timed out"
-              exit 1
-            fi
-            
-            sleep 30
-          done
+          if [ "$STATUS" != "Ready" ] || [ "$HEALTH" != "Green" ]; then
+            echo "Warning: Environment may have issues. Checking recent events..."
+            aws elasticbeanstalk describe-events \
+              --environment-name ${{ env.EB_ENVIRONMENT_NAME }} \
+              --max-items 10 \
+              --query 'Events[*].{Time:EventDate,Message:Message}' \
+              --output table
+          fi
