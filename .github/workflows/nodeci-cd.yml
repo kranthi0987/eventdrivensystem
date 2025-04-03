@@ -426,13 +426,11 @@ jobs:
                 "Namespace=aws:autoscaling:launchconfiguration,OptionName=InstanceType,Value=${INSTANCE_TYPE}" \
                 "Namespace=aws:elasticbeanstalk:environment,OptionName=EnvironmentType,Value=SingleInstance" \
                 "Namespace=aws:elasticbeanstalk:application:environment,OptionName=NODE_ENV,Value=production" \
-                "Namespace=aws:elasticbeanstalk:container:nodejs,OptionName=NodeVersion,Value=22" \
-                "Namespace=aws:elasticbeanstalk:container:nodejs,OptionName=ProxyServer,Value=nginx" \
-                "Namespace=aws:elasticbeanstalk:environment:proxy,OptionName=ProxyServer,Value=nginx" \
-                "Namespace=aws:elasticbeanstalk:container:nodejs,OptionName=NodeCommand,Value=npm start" \
                 "Namespace=aws:elasticbeanstalk:application:environment,OptionName=PORT,Value=8081" \
+                "Namespace=aws:elasticbeanstalk:environment:proxy,OptionName=ProxyServer,Value=nginx" \
                 "Namespace=aws:elasticbeanstalk:environment:process:default,OptionName=HealthCheckPath,Value=/" \
                 "Namespace=aws:elasticbeanstalk:environment:process:default,OptionName=Port,Value=8081" \
+                "Namespace=aws:elasticbeanstalk:environment:process:default,OptionName=Command,Value=npm start" \
               --version-label "${VERSION_LABEL}"
           else
             echo "Updating existing environment..."
