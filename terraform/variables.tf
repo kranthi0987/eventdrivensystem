@@ -42,93 +42,24 @@ variable "public_subnet_cidrs" {
   default     = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
 }
 
-# Elastic Beanstalk Configuration
-variable "app_name" {
-  description = "Application name"
-  type        = string
-  default     = "eventdrivensystem"
-}
-
+# Application Configuration
 variable "app_port" {
   description = "Application port"
   type        = number
-  default     = 3000
+  default     = 8080
+}
+
+# Elastic Beanstalk Configuration
+variable "solution_stack_name" {
+  description = "Elastic Beanstalk solution stack name"
+  type        = string
+  default     = "64bit Amazon Linux 2023 v6.5.0 running Node.js 22"
 }
 
 variable "instance_type" {
   description = "EC2 instance type for Elastic Beanstalk"
   type        = string
-  default     = "t2.micro"
-}
-
-variable "min_instances" {
-  description = "Minimum number of EC2 instances"
-  type        = number
-  default     = 1
-}
-
-variable "max_instances" {
-  description = "Maximum number of EC2 instances"
-  type        = number
-  default     = 4
-}
-
-# RDS Configuration
-variable "db_name" {
-  description = "Database name"
-  type        = string
-  default     = "eventdrivensystem"
-}
-
-variable "db_username" {
-  description = "Database username"
-  type        = string
-  default     = "admin"
-}
-
-variable "db_password" {
-  description = "Database password"
-  type        = string
-  sensitive   = true
-}
-
-variable "db_instance_class" {
-  description = "Database instance class"
-  type        = string
-  default     = "db.t3.micro"
-}
-
-# CI/CD Configuration
-variable "github_repository_url" {
-  description = "GitHub repository URL"
-  type        = string
-}
-
-variable "github_repository_id" {
-  description = "GitHub repository ID (owner/repo)"
-  type        = string
-}
-
-variable "branch_name" {
-  description = "GitHub branch name to build from"
-  type        = string
-  default     = "main"
-}
-
-variable "elastic_beanstalk_app_name" {
-  description = "Elastic Beanstalk application name"
-  type        = string
-}
-
-variable "elastic_beanstalk_env_name" {
-  description = "Elastic Beanstalk environment name"
-  type        = string
-}
-
-variable "ecr_repository" {
-  description = "ECR repository name"
-  type        = string
-  default     = "eventdrivensystem"
+  default     = "t3.micro"
 }
 
 # Frontend Configuration

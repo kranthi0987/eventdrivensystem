@@ -26,28 +26,229 @@ module "vpc" {
   public_subnets  = var.public_subnet_cidrs
 }
 
-module "elastic_beanstalk" {
-  source = "./modules/elastic_beanstalk"
-  
-  environment     = var.environment
-  vpc_id         = module.vpc.vpc_id
-  private_subnets = module.vpc.private_subnet_ids
-  public_subnets  = module.vpc.public_subnet_ids
-  
-  app_name       = var.app_name
-  app_port       = var.app_port
-  instance_type  = var.instance_type
-  min_instances  = var.min_instances
-  max_instances  = var.max_instances
+# Elastic Beanstalk Application
+resource "aws_elastic_beanstalk_application" "app" {
+  name        = "${var.environment}-${var.project_name}"
+  description = "Event Driven System Application"
 }
 
-module "redis" {
-  source = "./modules/redis"
-  
-  environment     = var.environment
-  vpc_id         = module.vpc.vpc_id
-  private_subnet_ids = module.vpc.private_subnet_ids
-  app_security_group_id = module.elastic_beanstalk.security_group_id
+# Elastic Beanstalk Environment
+resource "aws_elastic_beanstalk_environment" "app" {
+  name                = "${var.environment}-${var.project_name}-env"
+  application         = aws_elastic_beanstalk_application.app.name
+  solution_stack_name = var.solution_stack_name
+
+  setting {
+    namespace = "aws:autoscaling:launchconfiguration"
+    name      = "InstanceType"
+    value     = var.instance_type
+  }
+
+  setting {
+    namespace = "aws:elasticbeanstalk:environment"
+    name      = "EnvironmentType"
+    value     = "SingleInstance"
+  }
+
+  setting {
+    namespace = "aws:autoscaling:launchconfiguration"
+    name      = "IamInstanceProfile"
+    value     = aws_iam_instance_profile.eb_ec2_profile.name
+  }
+
+  setting {
+    namespace = "aws:elasticbeanstalk:container:nodejs"
+    name      = "NodeVersion"
+    value     = "22"
+  }
+
+  setting {
+    namespace = "aws:elasticbeanstalk:container:nodejs"
+    name      = "NodeCommand"
+    value     = "npm start"
+  }
+
+  setting {
+    namespace = "aws:elasticbeanstalk:application:environment"
+    name      = "NODE_ENV"
+    value     = var.environment
+  }
+
+  setting {
+    namespace = "aws:elasticbeanstalk:application:environment"
+    name      = "PORT"
+    value     = tostring(var.app_port)
+  }
+
+  setting {
+    namespace = "aws:elasticbeanstalk:environment:proxy:staticfiles"
+    name      = "/static"
+    value     = "/static"
+  }
+
+  setting {
+    namespace = "aws:elasticbeanstalk:environment:proxy"
+    name      = "ProxyServer"
+    value     = "nginx"
+  }
+
+  setting {
+    namespace = "aws:elasticbeanstalk:environment:process:default"
+    name      = "HealthCheckPath"
+    value     = "/health"
+  }
+
+  setting {
+    namespace = "aws:elasticbeanstalk:environment:process:default"
+    name      = "Port"
+    value     = tostring(var.app_port)
+  }
+
+  setting {
+    namespace = "aws:elasticbeanstalk:environment:process:default"
+    name      = "Protocol"
+    value     = "HTTP"
+  }
+
+  setting {
+    namespace = "aws:elasticbeanstalk:environment:process:default"
+    name      = "StickinessEnabled"
+    value     = "true"
+  }
+
+  setting {
+    namespace = "aws:elasticbeanstalk:environment:process:default"
+    name      = "StickinessLBCookieDurationSeconds"
+    value     = "86400"
+  }
+
+  setting {
+    namespace = "aws:elasticbeanstalk:environment:process:default"
+    name      = "HealthCheckInterval"
+    value     = "30"
+  }
+
+  setting {
+    namespace = "aws:elasticbeanstalk:environment:process:default"
+    name      = "HealthCheckTimeout"
+    value     = "10"
+  }
+
+  setting {
+    namespace = "aws:elasticbeanstalk:environment:process:default"
+    name      = "HealthyThresholdCount"
+    value     = "2"
+  }
+
+  setting {
+    namespace = "aws:elasticbeanstalk:environment:process:default"
+    name      = "UnhealthyThresholdCount"
+    value     = "5"
+  }
+
+  setting {
+    namespace = "aws:elasticbeanstalk:environment:proxy"
+    name      = "ProxyBuffering"
+    value     = "off"
+  }
+
+  setting {
+    namespace = "aws:elasticbeanstalk:environment:proxy"
+    name      = "ProxyBuffers"
+    value     = "8 16k"
+  }
+
+  setting {
+    namespace = "aws:elasticbeanstalk:environment:proxy"
+    name      = "ProxyBufferSize"
+    value     = "8k"
+  }
+
+  setting {
+    namespace = "aws:elasticbeanstalk:environment:proxy"
+    name      = "ProxyBusyBuffersSize"
+    value     = "8k"
+  }
+
+  setting {
+    namespace = "aws:elasticbeanstalk:environment:proxy"
+    name      = "ProxyMaxTempFileSize"
+    value     = "0"
+  }
+
+  setting {
+    namespace = "aws:elasticbeanstalk:environment:proxy"
+    name      = "ProxyConnectTimeout"
+    value     = "5"
+  }
+
+  setting {
+    namespace = "aws:elasticbeanstalk:environment:proxy"
+    name      = "ProxyReadTimeout"
+    value     = "60"
+  }
+
+  setting {
+    namespace = "aws:elasticbeanstalk:environment:proxy"
+    name      = "ProxySendTimeout"
+    value     = "60"
+  }
+
+  vpc_settings {
+    vpc_id             = module.vpc.vpc_id
+    subnet_ids         = module.vpc.private_subnet_ids
+    security_groups    = [aws_security_group.eb_app.id]
+    associate_public_ip_address = false
+  }
+}
+
+# IAM Roles and Instance Profile
+resource "aws_iam_role" "eb_ec2_role" {
+  name = "${var.environment}-${var.project_name}-eb-ec2-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "eb_ec2_role_policy" {
+  role       = aws_iam_role.eb_ec2_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSElasticBeanstalkWebTier"
+}
+
+resource "aws_iam_instance_profile" "eb_ec2_profile" {
+  name = "${var.environment}-${var.project_name}-eb-ec2-profile"
+  role = aws_iam_role.eb_ec2_role.name
+}
+
+# Security Group for Elastic Beanstalk
+resource "aws_security_group" "eb_app" {
+  name        = "${var.environment}-${var.project_name}-eb-app-sg"
+  description = "Security group for Elastic Beanstalk application"
+  vpc_id      = module.vpc.vpc_id
+
+  ingress {
+    from_port   = var.app_port
+    to_port     = var.app_port
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 }
 
 # Frontend Infrastructure
@@ -60,205 +261,11 @@ module "frontend" {
   certificate_arn = var.frontend_certificate_arn
 }
 
-# CI/CD Infrastructure
-# CodeBuild Project
-resource "aws_codebuild_project" "nodeci_cd" {
-  name          = "${var.environment}-${var.project_name}-build"
-  description   = "Build project for NodeCI-CD"
-  build_timeout = "30"
-  service_role  = aws_iam_role.codebuild_role.arn
-
-  artifacts {
-    type = "NO_ARTIFACTS"
-  }
-
-  environment {
-    compute_type                = "BUILD_GENERAL1_SMALL"
-    image                      = "aws/codebuild/amazonlinux2-x86_64-standard:4.0"
-    type                       = "LINUX_CONTAINER"
-    image_pull_credentials_type = "CODEBUILD"
-  }
-
-  source {
-    type            = "GITHUB"
-    location        = var.github_repository_url
-    git_clone_depth = 1
-    buildspec       = "buildspec.yml"
-  }
-
-  vpc_config {
-    vpc_id             = module.vpc.vpc_id
-    subnets            = module.vpc.private_subnet_ids
-    security_group_ids = [aws_security_group.codebuild_sg.id]
-  }
+# Outputs
+output "eb_environment_url" {
+  value = aws_elastic_beanstalk_environment.app.cname
 }
 
-# CodePipeline
-resource "aws_codepipeline" "nodeci_cd" {
-  name     = "${var.environment}-${var.project_name}-pipeline"
-  role_arn = aws_iam_role.codepipeline_role.arn
-
-  artifact_store {
-    location = aws_s3_bucket.artifact_store.bucket
-    type     = "S3"
-  }
-
-  stage {
-    name = "Source"
-
-    action {
-      name             = "Source"
-      category         = "Source"
-      owner            = "AWS"
-      provider         = "CodeStarSourceConnection"
-      version          = "1"
-      output_artifacts = ["source_output"]
-
-      configuration = {
-        ConnectionArn    = aws_codestarconnections_connection.github.arn
-        FullRepositoryId = var.github_repository_id
-        BranchName       = var.branch_name
-        OutputArtifactFormat = "CODE_ZIP"
-      }
-    }
-  }
-
-  stage {
-    name = "Build"
-
-    action {
-      name            = "Build"
-      category        = "Build"
-      owner           = "AWS"
-      provider        = "CodeBuild"
-      input_artifacts = ["source_output"]
-      version         = "1"
-
-      configuration = {
-        ProjectName = aws_codebuild_project.nodeci_cd.name
-      }
-    }
-  }
-
-  stage {
-    name = "Deploy"
-
-    action {
-      name            = "Deploy"
-      category        = "Deploy"
-      owner           = "AWS"
-      provider        = "ElasticBeanstalk"
-      input_artifacts = ["source_output"]
-      version         = "1"
-
-      configuration = {
-        ApplicationName = var.elastic_beanstalk_app_name
-        EnvironmentName = var.elastic_beanstalk_env_name
-      }
-    }
-  }
-}
-
-# S3 Bucket for Artifacts
-resource "aws_s3_bucket" "artifact_store" {
-  bucket = "${var.environment}-${var.project_name}-artifacts-${data.aws_caller_identity.current.account_id}"
-}
-
-resource "aws_s3_bucket_versioning" "artifact_store" {
-  bucket = aws_s3_bucket.artifact_store.id
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-# IAM Roles and Policies
-resource "aws_iam_role" "codebuild_role" {
-  name = "${var.environment}-${var.project_name}-codebuild-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "codebuild.amazonaws.com"
-        }
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role" "codepipeline_role" {
-  name = "${var.environment}-${var.project_name}-codepipeline-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "codepipeline.amazonaws.com"
-        }
-      }
-    ]
-  })
-}
-
-# Security Group for CodeBuild
-resource "aws_security_group" "codebuild_sg" {
-  name        = "${var.environment}-${var.project_name}-codebuild-sg"
-  description = "Security group for CodeBuild project"
-  vpc_id      = module.vpc.vpc_id
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-# GitHub Connection
-resource "aws_codestarconnections_connection" "github" {
-  name          = "${var.environment}-${var.project_name}-github"
-  provider_type = "GitHub"
-}
-
-# Data source for AWS account ID
-data "aws_caller_identity" "current" {}
-
-# Update CodeBuild IAM role to include S3 and CloudFront permissions
-resource "aws_iam_role_policy" "codebuild_frontend_deploy" {
-  name = "${var.environment}-${var.project_name}-codebuild-frontend-deploy"
-  role = aws_iam_role.codebuild_role.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "s3:PutObject",
-          "s3:GetObject",
-          "s3:ListBucket",
-          "s3:DeleteObject"
-        ]
-        Resource = [
-          "arn:aws:s3:::${var.frontend_bucket_name}",
-          "arn:aws:s3:::${var.frontend_bucket_name}/*"
-        ]
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "cloudfront:CreateInvalidation"
-        ]
-        Resource = [
-          module.frontend.cloudfront_distribution_arn
-        ]
-      }
-    ]
-  })
+output "frontend_url" {
+  value = "http://${aws_elastic_beanstalk_environment.app.cname}"
 } 
