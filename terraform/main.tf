@@ -11,40 +11,19 @@ provider "aws" {
   region = var.aws_region
 }
 
-# Create S3 bucket for Terraform state
-resource "aws_s3_bucket" "terraform_state" {
+# Use data source for existing S3 bucket for Terraform state
+data "aws_s3_bucket" "terraform_state" {
   bucket = "eventdrivensystem-terraform-state"
-}
-
-resource "aws_s3_bucket_versioning" "terraform_state" {
-  bucket = aws_s3_bucket.terraform_state.id
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_state" {
-  bucket = aws_s3_bucket.terraform_state.id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-  }
-}
-
-resource "aws_s3_bucket_public_access_block" "terraform_state" {
-  bucket = aws_s3_bucket.terraform_state.id
-
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
 }
 
 # Use data source for existing Elastic Beanstalk application
 data "aws_elastic_beanstalk_application" "app" {
   name = var.elastic_beanstalk_app_name
+}
+
+# Use data source for existing IAM role
+data "aws_iam_role" "eb_instance_role" {
+  name = "${var.project_name}-eb-instance-role"
 }
 
 module "vpc" {
@@ -136,29 +115,7 @@ resource "aws_elastic_beanstalk_environment" "app" {
 # IAM Instance Profile for Elastic Beanstalk
 resource "aws_iam_instance_profile" "eb_instance_profile" {
   name = "${var.project_name}-eb-instance-profile"
-  role = aws_iam_role.eb_instance_role.name
-}
-
-resource "aws_iam_role" "eb_instance_role" {
-  name = "${var.project_name}-eb-instance-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "ec2.amazonaws.com"
-        }
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "eb_web_tier" {
-  role       = aws_iam_role.eb_instance_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AWSElasticBeanstalkWebTier"
+  role = data.aws_iam_role.eb_instance_role.name
 }
 
 # Security Group for Elastic Beanstalk
