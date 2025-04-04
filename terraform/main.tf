@@ -109,12 +109,15 @@ resource "tls_private_key" "ssh" {
 }
 
 resource "aws_key_pair" "app" {
-  key_name   = "eventdrivensystem-key"
+  key_name   = "${var.project_name}-key"
   public_key = file("${path.module}/ssh_key.pub")
 
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-key"
+  })
+
   lifecycle {
-    # Prevent destroy of existing key pair
-    prevent_destroy = true
+    create_before_destroy = true
   }
 }
 
