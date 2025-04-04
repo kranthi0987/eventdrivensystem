@@ -329,103 +329,132 @@ jobs:
             "s3://${TERRAFORM_STATE_BUCKET}/${{ env.ZIP_FILE_NAME }}" \
             --sse AES256
 
-      - name: Cleanup existing resources
-        working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.5.0"
+          terraform_wrapper: false
+
+      - name: Prepare Terraform Directory
         run: |
-          # Delete key pair if it exists
+          echo "Creating Terraform working directory..."
+          mkdir -p ${{ env.TERRAFORM_WORKING_DIR }}
+          
+          echo "Generating SSH key..."
+          cd ${{ env.TERRAFORM_WORKING_DIR }}
+          ssh-keygen -t rsa -b 4096 -f ssh_key -N "" -C "ec2-user"
+          
+          echo "Creating variables file..."
+          cat > variables.tf << 'EOF'
+          variable "aws_region" {
+            type = string
+          }
+          variable "project_name" {
+            type = string
+          }
+          variable "environment" {
+            type = string
+          }
+          variable "instance_type" {
+            type = string
+          }
+          variable "app_port" {
+            type = number
+          }
+          variable "frontend_bucket_name" {
+            type = string
+          }
+          variable "vpc_cidr" {
+            type = string
+            default = "10.0.0.0/16"
+          }
+          variable "public_subnet_cidrs" {
+            type = list(string)
+            default = ["10.0.101.0/24", "10.0.102.0/24"]
+          }
+          variable "private_subnet_cidrs" {
+            type = list(string)
+            default = ["10.0.1.0/24", "10.0.2.0/24"]
+          }
+          variable "availability_zones" {
+            type = list(string)
+          }
+          variable "tags" {
+            type = map(string)
+            default = {
+              Environment = "production"
+              Terraform   = "true"
+            }
+          }
+          EOF
+
+      - name: Cleanup existing resources
+        run: |
+          echo "Cleaning up existing resources..."
           aws ec2 delete-key-pair --key-name eventdrivensystem-key || true
           
-          # Get instance profile
           INSTANCE_PROFILE="eventdrivensystem-ec2-profile"
-          
-          # Remove role from instance profile if it exists
           if aws iam get-instance-profile --instance-profile-name $INSTANCE_PROFILE 2>/dev/null; then
-            echo "Removing role from instance profile..."
-            for role in $(aws iam list-instance-profile-roles --instance-profile-name $INSTANCE_PROFILE --query 'Roles[*].RoleName' --output text); do
-              aws iam remove-role-from-instance-profile --instance-profile-name $INSTANCE_PROFILE --role-name $role || true
-            done
-            
-            # Delete instance profile
-            echo "Deleting instance profile..."
+            echo "Cleaning up instance profile..."
+            aws iam remove-role-from-instance-profile \
+              --instance-profile-name $INSTANCE_PROFILE \
+              --role-name eventdrivensystem-ec2-role || true
             aws iam delete-instance-profile --instance-profile-name $INSTANCE_PROFILE || true
-            
-            # Wait for deletion to complete
-            echo "Waiting for instance profile deletion..."
-            sleep 10
           fi
           
-          # Detach policies from role
-          echo "Detaching policies from role..."
-          for policy in $(aws iam list-attached-role-policies --role-name eventdrivensystem-ec2-role --query 'AttachedPolicies[*].PolicyArn' --output text); do
-            aws iam detach-role-policy --role-name eventdrivensystem-ec2-role --policy-arn "$policy" || true
-          done
-          
-          # Delete role
-          echo "Deleting IAM role..."
-          aws iam delete-role --role-name eventdrivensystem-ec2-role || true
-          
-          echo "Waiting for resources to be fully deleted..."
-          sleep 15
+          echo "Waiting for resources to be cleaned up..."
+          sleep 10
 
-      - name: Generate SSH Key
+      - name: Initialize Terraform
         working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
         run: |
-          # Generate SSH key pair
-          ssh-keygen -t rsa -b 4096 -f ssh_key -N "" -C "ec2-user"
-          echo "Generated SSH key pair"
-          ls -la ssh_key*
-
-      - name: Terraform Init
-        working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
-        run: |
+          echo "Verifying Terraform installation..."
+          terraform version
+          
           echo "Initializing Terraform..."
-          terraform init
+          terraform init \
+            -backend=true \
+            -backend-config="bucket=${{ env.TERRAFORM_STATE_BUCKET }}" \
+            -backend-config="key=terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}"
 
-      - name: Terraform Apply
+      - name: Apply Terraform Configuration
         working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
         run: |
           terraform apply -auto-approve \
             -var="aws_region=${{ env.AWS_REGION }}" \
-            -var="app_name=eventdrivensystem" \
-            -var="environment=production" \
             -var="project_name=eventdrivensystem" \
+            -var="environment=production" \
             -var="instance_type=${{ env.INSTANCE_TYPE }}" \
             -var="app_port=${{ env.APP_PORT }}" \
-            -var="frontend_bucket_name=${{ env.S3_BUCKET_NAME }}"
+            -var="frontend_bucket_name=${{ env.S3_BUCKET_NAME }}" \
+            -var="availability_zones=[\"${{ env.AWS_REGION }}a\",\"${{ env.AWS_REGION }}b\"]"
 
       - name: Deploy application
         run: |
-          # Get EC2 instance public IP
-          EC2_IP=$(terraform output -state=terraform/terraform.tfstate -raw instance_public_ip)
+          EC2_IP=$(terraform output -state=${{ env.TERRAFORM_WORKING_DIR }}/terraform.tfstate -raw instance_public_ip)
           
           echo "Waiting for instance to be ready..."
           sleep 60
           
-          # Copy deployment package and scripts
           echo "Copying files to EC2..."
           scp -o StrictHostKeyChecking=no \
-            -i terraform/ssh_key.pem \
+            -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
             ${{ env.ZIP_FILE_NAME }} scripts/setup.sh scripts/deploy.sh \
             ${EC2_USER}@${EC2_IP}:/tmp/
           
-          # Run setup and deployment
           echo "Running setup and deployment..."
           ssh -o StrictHostKeyChecking=no \
-            -i terraform/ssh_key.pem \
+            -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
             ${EC2_USER}@${EC2_IP} '
-              echo "Making scripts executable..."
               chmod +x /tmp/setup.sh /tmp/deploy.sh
-              
-              echo "Running setup script..."
               sudo /tmp/setup.sh
-              
-              echo "Running deployment script..."
               /tmp/deploy.sh
             '
 
       - name: Verify deployment
         run: |
-          EC2_IP=$(terraform output -state=terraform/terraform.tfstate -raw instance_public_ip)
+          EC2_IP=$(terraform output -state=${{ env.TERRAFORM_WORKING_DIR }}/terraform.tfstate -raw instance_public_ip)
           
           echo "Waiting for application to be ready..."
           sleep 30

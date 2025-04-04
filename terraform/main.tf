@@ -103,11 +103,6 @@ resource "aws_security_group" "app" {
 }
 
 # SSH Key
-resource "tls_private_key" "ssh" {
-  algorithm = "RSA"
-  rsa_bits  = 4096
-}
-
 resource "aws_key_pair" "app" {
   key_name   = "${var.project_name}-key"
   public_key = file("${path.module}/ssh_key.pub")
@@ -115,16 +110,6 @@ resource "aws_key_pair" "app" {
   tags = merge(var.tags, {
     Name = "${var.project_name}-key"
   })
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
-resource "local_file" "ssh_key" {
-  filename        = "${path.module}/ssh_key.pem"
-  content        = tls_private_key.ssh.private_key_pem
-  file_permission = "0600"
 }
 
 # IAM Role for EC2
@@ -209,8 +194,4 @@ output "instance_public_ip" {
 
 output "instance_public_dns" {
   value = aws_instance.app.public_dns
-}
-
-output "ssh_key_path" {
-  value = local_file.ssh_key.filename
 } 
