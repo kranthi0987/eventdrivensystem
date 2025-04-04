@@ -11,7 +11,7 @@ public_subnet_cidrs = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
 
 # Elastic Beanstalk Configuration
 app_name = "eventdrivensystem"
-app_port = 3000
+app_port = 8081
 instance_type = "t3.micro"
 min_instances = 1
 max_instances = 1
@@ -35,4 +35,7 @@ tags = {
   Project     = "eventdrivensystem"
   Terraform   = "true"
   ManagedBy   = "terraform"
-} 
+}
+
+# Frontend Configuration
+frontend_bucket_name = "event-monitor-frontend" 

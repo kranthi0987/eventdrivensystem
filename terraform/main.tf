@@ -11,123 +11,82 @@ provider "aws" {
   region = var.aws_region
 }
 
-# Use data source for existing S3 bucket for Terraform state
-data "aws_s3_bucket" "terraform_state" {
-  bucket = "eventdrivensystem-terraform-state"
+# VPC and Network Configuration
+resource "aws_vpc" "main" {
+  cidr_block           = var.vpc_cidr
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-vpc"
+  })
 }
 
-# Use data source for existing Elastic Beanstalk application
-data "aws_elastic_beanstalk_application" "app" {
-  name = var.elastic_beanstalk_app_name
+resource "aws_subnet" "public" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = var.public_subnet_cidrs[0]
+  map_public_ip_on_launch = true
+  availability_zone       = var.availability_zones[0]
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-public-subnet"
+  })
 }
 
-# Use data source for existing IAM role
-data "aws_iam_role" "eb_instance_role" {
-  name = "${var.project_name}-eb-instance-role"
+resource "aws_internet_gateway" "main" {
+  vpc_id = aws_vpc.main.id
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-igw"
+  })
 }
 
-# Use data source for existing IAM instance profile
-data "aws_iam_instance_profile" "eb_instance_profile" {
-  name = "${var.app_name}-eb-instance-profile"
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.main.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.main.id
+  }
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-public-rt"
+  })
 }
 
-module "vpc" {
-  source = "./modules/vpc"
-  
-  environment     = var.environment
-  vpc_cidr       = var.vpc_cidr
-  azs            = var.availability_zones
-  private_subnets = var.private_subnet_cidrs
-  public_subnets  = var.public_subnet_cidrs
+resource "aws_route_table_association" "public" {
+  subnet_id      = aws_subnet.public.id
+  route_table_id = aws_route_table.public.id
 }
 
-# Elastic Beanstalk Environment
-resource "aws_elastic_beanstalk_environment" "app" {
-  name                = "${var.app_name}-${var.environment}"
-  application         = data.aws_elastic_beanstalk_application.app.name
-  solution_stack_name = "64bit Amazon Linux 2023 v6.5.0 running Node.js 22"
-  tier                = "WebServer"
+# Security Group
+resource "aws_security_group" "app" {
+  name        = "${var.project_name}-app-sg"
+  description = "Security group for application"
+  vpc_id      = aws_vpc.main.id
 
-  setting {
-    namespace = "aws:autoscaling:launchconfiguration"
-    name      = "IamInstanceProfile"
-    value     = data.aws_iam_instance_profile.eb_instance_profile.name
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "HTTP"
   }
 
-  setting {
-    namespace = "aws:autoscaling:launchconfiguration"
-    name      = "InstanceType"
-    value     = "t3.micro"
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "SSH"
   }
-
-  setting {
-    namespace = "aws:autoscaling:asg"
-    name      = "MinSize"
-    value     = var.min_instances
-  }
-
-  setting {
-    namespace = "aws:autoscaling:asg"
-    name      = "MaxSize"
-    value     = var.max_instances
-  }
-
-  setting {
-    namespace = "aws:ec2:vpc"
-    name      = "VPCId"
-    value     = module.vpc.vpc_id
-  }
-
-  setting {
-    namespace = "aws:ec2:vpc"
-    name      = "Subnets"
-    value     = join(",", module.vpc.private_subnet_ids)
-  }
-
-  setting {
-    namespace = "aws:ec2:vpc"
-    name      = "ELBSubnets"
-    value     = join(",", module.vpc.public_subnet_ids)
-  }
-
-  setting {
-    namespace = "aws:elasticbeanstalk:environment"
-    name      = "LoadBalancerType"
-    value     = "application"
-  }
-
-  setting {
-    namespace = "aws:elasticbeanstalk:environment:process:default"
-    name      = "HealthCheckPath"
-    value     = "/health"
-  }
-
-  setting {
-    namespace = "aws:elasticbeanstalk:application:environment"
-    name      = "NODE_ENV"
-    value     = var.environment
-  }
-
-  setting {
-    namespace = "aws:elasticbeanstalk:application:environment"
-    name      = "PORT"
-    value     = var.app_port
-  }
-
-  tags = var.tags
-}
-
-# Security Group for Elastic Beanstalk
-resource "aws_security_group" "eb_app" {
-  name        = "${var.environment}-${var.project_name}-eb-app-sg"
-  description = "Security group for Elastic Beanstalk application"
-  vpc_id      = module.vpc.vpc_id
 
   ingress {
     from_port   = var.app_port
     to_port     = var.app_port
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "Application port"
   }
 
   egress {
@@ -135,40 +94,111 @@ resource "aws_security_group" "eb_app" {
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow all outbound traffic"
+  }
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-app-sg"
+  })
+}
+
+# SSH Key
+resource "tls_private_key" "ssh" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
+resource "aws_key_pair" "app" {
+  key_name   = "${var.project_name}-key"
+  public_key = tls_private_key.ssh.public_key_openssh
+
+  tags = var.tags
+}
+
+resource "local_file" "ssh_key" {
+  filename        = "${path.module}/ssh_key.pem"
+  content        = tls_private_key.ssh.private_key_pem
+  file_permission = "0600"
+}
+
+# IAM Role for EC2
+resource "aws_iam_role" "ec2_role" {
+  name = "${var.project_name}-ec2-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "s3_access" {
+  role       = aws_iam_role.ec2_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
+}
+
+resource "aws_iam_instance_profile" "ec2_profile" {
+  name = "${var.project_name}-ec2-profile"
+  role = aws_iam_role.ec2_role.name
+}
+
+# EC2 Instance
+resource "aws_instance" "app" {
+  ami                    = data.aws_ami.amazon_linux_2.id
+  instance_type          = var.instance_type
+  key_name              = aws_key_pair.app.key_name
+  subnet_id             = aws_subnet.public.id
+  iam_instance_profile  = aws_iam_instance_profile.ec2_profile.name
+  vpc_security_group_ids = [aws_security_group.app.id]
+
+  root_block_device {
+    volume_size = 20
+    volume_type = "gp3"
+    encrypted   = true
+  }
+
+  user_data = <<-EOF
+              #!/bin/bash
+              yum update -y
+              yum install -y nginx
+              systemctl start nginx
+              systemctl enable nginx
+              EOF
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-app-server"
+  })
+}
+
+# Latest Amazon Linux 2 AMI
+data "aws_ami" "amazon_linux_2" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
   }
 }
 
-# Frontend Infrastructure
-module "frontend" {
-  source = "./modules/frontend"
-  
-  environment = var.environment
-  bucket_name = var.frontend_bucket_name
-  domain_name = var.frontend_domain_name
-  certificate_arn = var.frontend_certificate_arn
-}
-
 # Outputs
-output "elastic_beanstalk_environment_endpoint" {
-  value       = aws_elastic_beanstalk_environment.app.endpoint_url
-  description = "The URL to the Elastic Beanstalk Environment"
+output "instance_public_ip" {
+  value = aws_instance.app.public_ip
 }
 
-output "elastic_beanstalk_environment_name" {
-  value       = aws_elastic_beanstalk_environment.app.name
-  description = "Elastic Beanstalk Environment Name"
+output "instance_public_dns" {
+  value = aws_instance.app.public_dns
 }
 
-output "elastic_beanstalk_environment_id" {
-  value       = aws_elastic_beanstalk_environment.app.id
-  description = "Elastic Beanstalk Environment ID"
-}
-
-output "elastic_beanstalk_environment_health" {
-  value       = "To check health status, use AWS CLI: aws elasticbeanstalk describe-environments --environment-names ${aws_elastic_beanstalk_environment.app.name} --query 'Environments[0].Health' --output text"
-  description = "Elastic Beanstalk Environment Health Status (check using AWS CLI)"
-}
-
-output "frontend_url" {
-  value = "http://${aws_elastic_beanstalk_environment.app.cname}"
+output "ssh_key_path" {
+  value = local_file.ssh_key.filename
 } 
