@@ -37,7 +37,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '22'
+          node-version: '18'
           cache: 'npm'
 
       - name: Install dependencies
@@ -66,24 +66,30 @@ jobs:
           # Update system
           sudo yum update -y
           
-          # Install Node.js 22
+          # Install Node.js 18 (LTS)
           echo "Installing Node.js..."
-          curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash -
+          curl -fsSL https://rpm.nodesource.com/setup_18.x | sudo bash -
           sudo yum install -y nodejs
           
           # Verify Node.js installation
+          echo "Verifying Node.js installation..."
           node --version
           npm --version
+          
+          # Install development tools (needed for some npm packages)
+          echo "Installing development tools..."
+          sudo yum groupinstall -y "Development Tools"
           
           # Install PM2 globally and ensure it's in PATH
           echo "Installing PM2..."
           sudo npm install -g pm2
-          sudo ln -sf /usr/local/bin/pm2 /usr/bin/pm2
+          sudo env PATH=$PATH:/usr/bin:/usr/local/bin pm2 startup systemd -u ec2-user --hp /home/ec2-user
           
-          # Create app directory
+          # Create app directory and set permissions
           echo "Setting up application directory..."
           sudo mkdir -p /var/www/app
           sudo chown -R ec2-user:ec2-user /var/www/app
+          sudo chmod 755 /var/www/app
           
           # Install Nginx
           echo "Installing and configuring Nginx..."
@@ -134,12 +140,23 @@ jobs:
           
           APP_DIR="/var/www/app"
           
-          # Ensure PM2 is available
+          # Ensure directories exist
+          echo "Ensuring directories exist..."
+          sudo mkdir -p ${APP_DIR}
+          sudo chown -R ec2-user:ec2-user ${APP_DIR}
+          
+          # Ensure PM2 is available in PATH
           export PATH=$PATH:/usr/local/bin:/usr/bin
           
           echo "Stopping existing application..."
-          sudo pm2 stop app || true
-          sudo pm2 delete app || true
+          if command -v pm2 &> /dev/null; then
+            pm2 stop app || true
+            pm2 delete app || true
+          else
+            echo "PM2 not found, installing..."
+            sudo npm install -g pm2
+            sudo env PATH=$PATH:/usr/bin:/usr/local/bin pm2 startup systemd -u ec2-user --hp /home/ec2-user
+          fi
           
           echo "Cleaning up old files..."
           rm -rf ${APP_DIR}/*
@@ -152,21 +169,18 @@ jobs:
           npm ci --production
           
           echo "Starting application with PM2..."
-          sudo env PATH=$PATH pm2 start npm --name "app" -- start
-          sudo env PATH=$PATH pm2 save
-          
-          echo "Setting up PM2 startup script..."
-          sudo env PATH=$PATH pm2 startup systemd -u ec2-user --hp /home/ec2-user
+          pm2 start npm --name "app" -- start
+          pm2 save
           
           echo "Checking application status..."
-          sleep 5  # Wait for the application to start
+          sleep 10  # Wait longer for the application to start
           
-          if sudo pm2 show app | grep -q "online"; then
+          if pm2 show app | grep -q "online"; then
             echo "Application deployed successfully!"
             exit 0
           else
             echo "Deployment failed - application is not running"
-            sudo pm2 logs app
+            pm2 logs app
             exit 1
           fi
           EOF
@@ -242,7 +256,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '22'
+          node-version: '18'
           cache: 'npm'
 
       - name: Install dependencies
