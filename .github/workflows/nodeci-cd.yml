@@ -59,22 +59,34 @@ jobs:
           # Create setup script
           cat > scripts/setup.sh << 'EOF'
           #!/bin/bash
+          set -e  # Exit on any error
+          
+          echo "Starting system setup..."
           
           # Update system
           sudo yum update -y
           
           # Install Node.js 22
+          echo "Installing Node.js..."
           curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash -
           sudo yum install -y nodejs
           
-          # Install PM2 globally
-          sudo npm install -y pm2 -g
+          # Verify Node.js installation
+          node --version
+          npm --version
+          
+          # Install PM2 globally and ensure it's in PATH
+          echo "Installing PM2..."
+          sudo npm install -g pm2
+          sudo ln -sf /usr/local/bin/pm2 /usr/bin/pm2
           
           # Create app directory
+          echo "Setting up application directory..."
           sudo mkdir -p /var/www/app
           sudo chown -R ec2-user:ec2-user /var/www/app
           
           # Install Nginx
+          echo "Installing and configuring Nginx..."
           sudo yum install -y nginx
           
           # Configure Nginx
@@ -84,7 +96,7 @@ jobs:
               server_name _;
           
               location / {
-                  proxy_pass http://localhost:${APP_PORT};
+                  proxy_pass http://localhost:8081;
                   proxy_http_version 1.1;
                   proxy_set_header Upgrade $http_upgrade;
                   proxy_set_header Connection 'upgrade';
@@ -102,46 +114,59 @@ jobs:
           sudo systemctl start nginx
           
           # Configure firewall
+          echo "Configuring firewall..."
           sudo yum install -y firewalld
           sudo systemctl start firewalld
           sudo systemctl enable firewalld
           sudo firewall-cmd --permanent --add-service=http
           sudo firewall-cmd --permanent --add-service=https
           sudo firewall-cmd --reload
+          
+          echo "Setup completed successfully!"
           EOF
           
           # Create deployment script
           cat > scripts/deploy.sh << 'EOF'
           #!/bin/bash
+          set -e  # Exit on any error
+          
+          echo "Starting deployment..."
           
           APP_DIR="/var/www/app"
           
-          # Stop existing application
-          pm2 stop app || true
+          # Ensure PM2 is available
+          export PATH=$PATH:/usr/local/bin:/usr/bin
           
-          # Clean up old files
+          echo "Stopping existing application..."
+          sudo pm2 stop app || true
+          sudo pm2 delete app || true
+          
+          echo "Cleaning up old files..."
           rm -rf ${APP_DIR}/*
           
-          # Extract new files
+          echo "Extracting new files..."
           unzip -o /tmp/deploy.zip -d ${APP_DIR}
           
-          # Install dependencies
+          echo "Installing dependencies..."
           cd ${APP_DIR}
           npm ci --production
           
-          # Start application with PM2
-          pm2 start npm --name "app" -- start
-          pm2 save
+          echo "Starting application with PM2..."
+          sudo env PATH=$PATH pm2 start npm --name "app" -- start
+          sudo env PATH=$PATH pm2 save
           
-          # Configure PM2 to start on boot
-          sudo env PATH=$PATH:/usr/bin pm2 startup systemd -u ${USER} --hp /home/${USER}
+          echo "Setting up PM2 startup script..."
+          sudo env PATH=$PATH pm2 startup systemd -u ec2-user --hp /home/ec2-user
           
-          # Check if application is running
-          if pm2 show app | grep -q "online"; then
-            echo "Application deployed successfully"
+          echo "Checking application status..."
+          sleep 5  # Wait for the application to start
+          
+          if sudo pm2 show app | grep -q "online"; then
+            echo "Application deployed successfully!"
             exit 0
           else
-            echo "Deployment failed"
+            echo "Deployment failed - application is not running"
+            sudo pm2 logs app
             exit 1
           fi
           EOF
@@ -325,22 +350,28 @@ jobs:
           # Get EC2 instance public IP
           EC2_IP=$(terraform output -state=terraform/terraform.tfstate -raw instance_public_ip)
           
-          # Wait for instance to be ready
           echo "Waiting for instance to be ready..."
           sleep 60
           
           # Copy deployment package and scripts
+          echo "Copying files to EC2..."
           scp -o StrictHostKeyChecking=no \
             -i terraform/ssh_key.pem \
-            ${{ env.ZIP_FILE_NAME }} scripts/* \
+            ${{ env.ZIP_FILE_NAME }} scripts/setup.sh scripts/deploy.sh \
             ${EC2_USER}@${EC2_IP}:/tmp/
           
           # Run setup and deployment
+          echo "Running setup and deployment..."
           ssh -o StrictHostKeyChecking=no \
             -i terraform/ssh_key.pem \
             ${EC2_USER}@${EC2_IP} '
+              echo "Making scripts executable..."
               chmod +x /tmp/setup.sh /tmp/deploy.sh
+              
+              echo "Running setup script..."
               sudo /tmp/setup.sh
+              
+              echo "Running deployment script..."
               /tmp/deploy.sh
             '
 
