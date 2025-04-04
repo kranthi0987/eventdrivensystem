@@ -329,6 +329,12 @@ jobs:
             "s3://${TERRAFORM_STATE_BUCKET}/${{ env.ZIP_FILE_NAME }}" \
             --sse AES256
 
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.5.0"
+          terraform_wrapper: false
+
       - name: Cleanup existing resources
         working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
         run: |
@@ -352,7 +358,9 @@ jobs:
 
       - name: Terraform Init
         working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
-        run: terraform init
+        run: |
+          echo "Initializing Terraform..."
+          terraform init
 
       - name: Terraform Apply
         working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
