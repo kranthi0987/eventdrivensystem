@@ -329,10 +329,26 @@ jobs:
             "s3://${TERRAFORM_STATE_BUCKET}/${{ env.ZIP_FILE_NAME }}" \
             --sse AES256
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "1.5.0"
+      - name: Cleanup existing resources
+        working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
+        run: |
+          # Delete key pair if it exists
+          aws ec2 delete-key-pair --key-name eventdrivensystem-key || true
+          
+          # Detach policies from role
+          for policy in $(aws iam list-attached-role-policies --role-name eventdrivensystem-ec2-role --query 'AttachedPolicies[*].PolicyArn' --output text); do
+            aws iam detach-role-policy --role-name eventdrivensystem-ec2-role --policy-arn "$policy" || true
+          done
+          
+          # Delete instance profile if it exists
+          aws iam remove-role-from-instance-profile --instance-profile-name eventdrivensystem-ec2-role --role-name eventdrivensystem-ec2-role || true
+          aws iam delete-instance-profile --instance-profile-name eventdrivensystem-ec2-role || true
+          
+          # Delete role
+          aws iam delete-role --role-name eventdrivensystem-ec2-role || true
+          
+          echo "Waiting for resources to be fully deleted..."
+          sleep 10
 
       - name: Terraform Init
         working-directory: ${{ env.TERRAFORM_WORKING_DIR }}

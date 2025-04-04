@@ -109,10 +109,13 @@ resource "tls_private_key" "ssh" {
 }
 
 resource "aws_key_pair" "app" {
-  key_name   = "${var.project_name}-key"
-  public_key = tls_private_key.ssh.public_key_openssh
+  key_name   = "eventdrivensystem-key"
+  public_key = file("${path.module}/ssh_key.pub")
 
-  tags = var.tags
+  lifecycle {
+    # Prevent destroy of existing key pair
+    prevent_destroy = true
+  }
 }
 
 resource "local_file" "ssh_key" {
@@ -123,8 +126,8 @@ resource "local_file" "ssh_key" {
 
 # IAM Role for EC2
 resource "aws_iam_role" "ec2_role" {
-  name = "${var.project_name}-ec2-role"
-
+  name = "eventdrivensystem-ec2-role"
+  
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -138,7 +141,10 @@ resource "aws_iam_role" "ec2_role" {
     ]
   })
 
-  tags = var.tags
+  lifecycle {
+    # Prevent destroy of existing role
+    prevent_destroy = true
+  }
 }
 
 resource "aws_iam_role_policy_attachment" "s3_access" {
