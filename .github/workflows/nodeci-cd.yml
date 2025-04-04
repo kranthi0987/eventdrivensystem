@@ -329,11 +329,43 @@ jobs:
             "s3://${TERRAFORM_STATE_BUCKET}/${{ env.ZIP_FILE_NAME }}" \
             --sse AES256
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "1.5.0"
-          terraform_wrapper: false
+      - name: Cleanup existing resources
+        working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
+        run: |
+          # Delete key pair if it exists
+          aws ec2 delete-key-pair --key-name eventdrivensystem-key || true
+          
+          # Get instance profile
+          INSTANCE_PROFILE="eventdrivensystem-ec2-profile"
+          
+          # Remove role from instance profile if it exists
+          if aws iam get-instance-profile --instance-profile-name $INSTANCE_PROFILE 2>/dev/null; then
+            echo "Removing role from instance profile..."
+            for role in $(aws iam list-instance-profile-roles --instance-profile-name $INSTANCE_PROFILE --query 'Roles[*].RoleName' --output text); do
+              aws iam remove-role-from-instance-profile --instance-profile-name $INSTANCE_PROFILE --role-name $role || true
+            done
+            
+            # Delete instance profile
+            echo "Deleting instance profile..."
+            aws iam delete-instance-profile --instance-profile-name $INSTANCE_PROFILE || true
+            
+            # Wait for deletion to complete
+            echo "Waiting for instance profile deletion..."
+            sleep 10
+          fi
+          
+          # Detach policies from role
+          echo "Detaching policies from role..."
+          for policy in $(aws iam list-attached-role-policies --role-name eventdrivensystem-ec2-role --query 'AttachedPolicies[*].PolicyArn' --output text); do
+            aws iam detach-role-policy --role-name eventdrivensystem-ec2-role --policy-arn "$policy" || true
+          done
+          
+          # Delete role
+          echo "Deleting IAM role..."
+          aws iam delete-role --role-name eventdrivensystem-ec2-role || true
+          
+          echo "Waiting for resources to be fully deleted..."
+          sleep 15
 
       - name: Generate SSH Key
         working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
@@ -342,27 +374,6 @@ jobs:
           ssh-keygen -t rsa -b 4096 -f ssh_key -N "" -C "ec2-user"
           echo "Generated SSH key pair"
           ls -la ssh_key*
-
-      - name: Cleanup existing resources
-        working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
-        run: |
-          # Delete key pair if it exists
-          aws ec2 delete-key-pair --key-name eventdrivensystem-key || true
-          
-          # Detach policies from role
-          for policy in $(aws iam list-attached-role-policies --role-name eventdrivensystem-ec2-role --query 'AttachedPolicies[*].PolicyArn' --output text); do
-            aws iam detach-role-policy --role-name eventdrivensystem-ec2-role --policy-arn "$policy" || true
-          done
-          
-          # Delete instance profile if it exists
-          aws iam remove-role-from-instance-profile --instance-profile-name eventdrivensystem-ec2-role --role-name eventdrivensystem-ec2-role || true
-          aws iam delete-instance-profile --instance-profile-name eventdrivensystem-ec2-role || true
-          
-          # Delete role
-          aws iam delete-role --role-name eventdrivensystem-ec2-role || true
-          
-          echo "Waiting for resources to be fully deleted..."
-          sleep 10
 
       - name: Terraform Init
         working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
@@ -374,8 +385,13 @@ jobs:
         working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
         run: |
           terraform apply -auto-approve \
-            -var="frontend_bucket_name=${{ env.S3_BUCKET_NAME }}" \
-            -var="app_port=${{ env.APP_PORT }}"
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            -var="app_name=eventdrivensystem" \
+            -var="environment=production" \
+            -var="project_name=eventdrivensystem" \
+            -var="instance_type=${{ env.INSTANCE_TYPE }}" \
+            -var="app_port=${{ env.APP_PORT }}" \
+            -var="frontend_bucket_name=${{ env.S3_BUCKET_NAME }}"
 
       - name: Deploy application
         run: |
