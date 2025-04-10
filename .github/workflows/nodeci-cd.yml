@@ -400,17 +400,44 @@ jobs:
           echo "Cleaning up existing resources..."
           aws ec2 delete-key-pair --key-name eventdrivensystem-key || true
           
+          ROLE_NAME="eventdrivensystem-ec2-role"
           INSTANCE_PROFILE="eventdrivensystem-ec2-profile"
+          
+          echo "Checking for existing IAM resources..."
+          
+          # Check and cleanup instance profile
           if aws iam get-instance-profile --instance-profile-name $INSTANCE_PROFILE 2>/dev/null; then
-            echo "Cleaning up instance profile..."
+            echo "Removing role from instance profile..."
             aws iam remove-role-from-instance-profile \
               --instance-profile-name $INSTANCE_PROFILE \
-              --role-name eventdrivensystem-ec2-role || true
+              --role-name $ROLE_NAME || true
+              
+            echo "Deleting instance profile..."
             aws iam delete-instance-profile --instance-profile-name $INSTANCE_PROFILE || true
           fi
           
-          echo "Waiting for resources to be cleaned up..."
-          sleep 10
+          # Check and cleanup IAM role
+          if aws iam get-role --role-name $ROLE_NAME 2>/dev/null; then
+            echo "Detaching policies from role..."
+            for policy in $(aws iam list-attached-role-policies --role-name $ROLE_NAME --query 'AttachedPolicies[*].PolicyArn' --output text); do
+              echo "Detaching policy: $policy"
+              aws iam detach-role-policy --role-name $ROLE_NAME --policy-arn "$policy" || true
+            done
+            
+            echo "Deleting inline policies..."
+            for policy in $(aws iam list-role-policies --role-name $ROLE_NAME --query 'PolicyNames[*]' --output text); do
+              echo "Deleting inline policy: $policy"
+              aws iam delete-role-policy --role-name $ROLE_NAME --policy-name "$policy" || true
+            done
+            
+            echo "Deleting IAM role..."
+            aws iam delete-role --role-name $ROLE_NAME || true
+          fi
+          
+          echo "Waiting for IAM resources to be fully deleted..."
+          sleep 15
+          
+          echo "Cleanup completed"
 
       - name: Initialize Terraform
         working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
@@ -424,6 +451,15 @@ jobs:
             -backend-config="bucket=${{ env.TERRAFORM_STATE_BUCKET }}" \
             -backend-config="key=terraform.tfstate" \
             -backend-config="region=${{ env.AWS_REGION }}"
+
+      - name: Import existing resources if they exist
+        working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
+        run: |
+          # Try to import existing role if cleanup failed
+          if aws iam get-role --role-name eventdrivensystem-ec2-role 2>/dev/null; then
+            echo "Importing existing IAM role..."
+            terraform import aws_iam_role.ec2_role eventdrivensystem-ec2-role || true
+          fi
 
       - name: Apply Terraform Configuration
         working-directory: ${{ env.TERRAFORM_WORKING_DIR }}

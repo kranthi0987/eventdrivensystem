@@ -129,9 +129,15 @@ resource "aws_iam_role" "ec2_role" {
     ]
   })
 
+  # Add force_detach_policies to ensure clean deletion
+  force_detach_policies = true
+
+  # Add lifecycle rule to handle recreation
   lifecycle {
     create_before_destroy = true
   }
+
+  tags = var.tags
 }
 
 resource "aws_iam_role_policy_attachment" "s3_access" {
