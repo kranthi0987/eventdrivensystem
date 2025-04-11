@@ -490,36 +490,90 @@ jobs:
 
       - name: Deploy application
         run: |
+          # Get EC2 instance IP
           EC2_IP=$(terraform output -state=${{ env.TERRAFORM_WORKING_DIR }}/terraform.tfstate -raw instance_public_ip)
+          
+          echo "EC2 Instance IP: ${EC2_IP}"
+          
+          # Verify SSH key exists and has correct permissions
+          echo "Checking SSH key..."
+          ls -la ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key
+          chmod 600 ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key
           
           echo "Waiting for instance to be ready..."
           sleep 60
           
-          echo "Copying files to EC2..."
-          scp -o StrictHostKeyChecking=no \
-            -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
-            ${{ env.ZIP_FILE_NAME }} scripts/setup.sh scripts/deploy.sh \
-            ${EC2_USER}@${EC2_IP}:/tmp/
+          # Verify files exist before copying
+          echo "Verifying files exist..."
+          ls -la ${{ env.ZIP_FILE_NAME }} scripts/setup.sh scripts/deploy.sh
           
-          echo "Running setup and deployment..."
-          ssh -o StrictHostKeyChecking=no \
+          echo "Copying files to EC2..."
+          # Copy files one by one to better identify issues
+          scp -v -o StrictHostKeyChecking=no \
             -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
-            ${EC2_USER}@${EC2_IP} '
-              chmod +x /tmp/setup.sh /tmp/deploy.sh
-              sudo /tmp/setup.sh
-              /tmp/deploy.sh
-            '
+            ${{ env.ZIP_FILE_NAME }} ${EC2_USER}@${EC2_IP}:/tmp/
+          
+          scp -v -o StrictHostKeyChecking=no \
+            -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
+            scripts/setup.sh ${EC2_USER}@${EC2_IP}:/tmp/
+            
+          scp -v -o StrictHostKeyChecking=no \
+            -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
+            scripts/deploy.sh ${EC2_USER}@${EC2_IP}:/tmp/
+          
+          echo "Making scripts executable..."
+          ssh -v -o StrictHostKeyChecking=no \
+            -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
+            ${EC2_USER}@${EC2_IP} 'chmod +x /tmp/setup.sh /tmp/deploy.sh'
+          
+          echo "Running setup script..."
+          ssh -v -o StrictHostKeyChecking=no \
+            -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
+            ${EC2_USER}@${EC2_IP} 'sudo /tmp/setup.sh'
+          
+          echo "Running deployment script..."
+          ssh -v -o StrictHostKeyChecking=no \
+            -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
+            ${EC2_USER}@${EC2_IP} '/tmp/deploy.sh'
 
       - name: Verify deployment
         run: |
+          # Get EC2 instance IP
           EC2_IP=$(terraform output -state=${{ env.TERRAFORM_WORKING_DIR }}/terraform.tfstate -raw instance_public_ip)
           
           echo "Waiting for application to be ready..."
           sleep 30
           
-          if curl -s -f "http://${EC2_IP}"; then
-            echo "Application is responding successfully!"
-          else
-            echo "Application is not responding"
-            exit 1
-          fi
+          # Try multiple times to connect
+          MAX_RETRIES=5
+          RETRY_COUNT=0
+          
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            if curl -s -f "http://${EC2_IP}"; then
+              echo "Application is responding successfully!"
+              exit 0
+            else
+              echo "Attempt $((RETRY_COUNT + 1)) failed. Waiting before retry..."
+              sleep 10
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+            fi
+          done
+          
+          echo "Application is not responding after $MAX_RETRIES attempts"
+          
+          # Get logs from the instance for debugging
+          echo "Fetching logs from instance..."
+          ssh -o StrictHostKeyChecking=no \
+            -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
+            ${EC2_USER}@${EC2_IP} '
+              echo "PM2 Status:"
+              sudo env PATH=$PATH:/usr/local/bin:/usr/bin pm2 list
+              echo "PM2 Logs:"
+              sudo env PATH=$PATH:/usr/local/bin:/usr/bin pm2 logs app --lines 100
+              echo "Nginx Status:"
+              sudo systemctl status nginx
+              echo "Nginx Logs:"
+              sudo cat /var/log/nginx/error.log
+            '
+          
+          exit 1
