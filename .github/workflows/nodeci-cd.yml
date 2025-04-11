@@ -37,7 +37,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '22'
+          node-version: '16'
           cache: 'npm'
 
       - name: Install dependencies
@@ -66,9 +66,9 @@ jobs:
           # Update system
           sudo yum update -y
           
-          # Install Node.js 18 (LTS version compatible with Amazon Linux 2)
+          # Install Node.js 16 (LTS version compatible with Amazon Linux 2)
           echo "Installing Node.js..."
-          curl -fsSL https://rpm.nodesource.com/setup_18.x | sudo bash -
+          curl -fsSL https://rpm.nodesource.com/setup_16.x | sudo bash -
           sudo yum install -y nodejs
           
           # Verify Node.js installation
@@ -264,7 +264,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '22'
+          node-version: '16'
           cache: 'npm'
 
       - name: Install dependencies
