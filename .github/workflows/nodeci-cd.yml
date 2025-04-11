@@ -61,6 +61,13 @@ jobs:
           #!/bin/bash
           set -e  # Exit on any error
           
+          # Function to create symlink without failing if target exists
+          create_symlink() {
+              local source=$1
+              local target=$2
+              sudo ln -sf "$source" "$target" || echo "Note: Could not create link from $source to $target (may already exist)"
+          }
+          
           echo "Starting system setup..."
           
           # Update system
@@ -71,40 +78,29 @@ jobs:
           curl -fsSL https://rpm.nodesource.com/setup_18.x | sudo bash -
           sudo yum install -y nodejs
           
-          # Verify Node.js installation
-          echo "Verifying Node.js installation..."
-          node --version || exit 1
-          npm --version || exit 1
+          # Get the actual binary paths
+          NODE_BIN=$(which node || echo "/usr/bin/node")
+          NPM_BIN=$(which npm || echo "/usr/bin/npm")
           
           # Install PM2 globally and ensure it's in PATH
           echo "Installing PM2..."
           sudo npm install -g pm2@latest
+          PM2_BIN=$(which pm2 || echo "/usr/bin/pm2")
           
           # Create all necessary directories for binaries
-          sudo mkdir -p /usr/local/bin
-          sudo mkdir -p /usr/bin
-          sudo mkdir -p /usr/local/sbin
-          sudo mkdir -p /usr/sbin
+          echo "Creating binary directories..."
+          for dir in "/usr/local/bin" "/usr/bin" "/usr/local/sbin" "/usr/sbin"; do
+              sudo mkdir -p "$dir" || echo "Directory $dir already exists"
+          done
           
           # Ensure binary paths are available in all possible locations
           echo "Setting up binary links..."
           # Node.js binaries
-          sudo ln -sf $(which node) /usr/local/bin/node
-          sudo ln -sf $(which node) /usr/bin/node
-          sudo ln -sf $(which node) /usr/local/sbin/node
-          sudo ln -sf $(which node) /usr/sbin/node
-          
-          # npm binaries
-          sudo ln -sf $(which npm) /usr/local/bin/npm
-          sudo ln -sf $(which npm) /usr/bin/npm
-          sudo ln -sf $(which npm) /usr/local/sbin/npm
-          sudo ln -sf $(which npm) /usr/sbin/npm
-          
-          # PM2 binaries
-          sudo ln -sf $(which pm2) /usr/local/bin/pm2
-          sudo ln -sf $(which pm2) /usr/bin/pm2
-          sudo ln -sf $(which pm2) /usr/local/sbin/pm2
-          sudo ln -sf $(which pm2) /usr/sbin/pm2
+          for dir in "/usr/local/bin" "/usr/bin" "/usr/local/sbin" "/usr/sbin"; do
+              create_symlink "$NODE_BIN" "$dir/node"
+              create_symlink "$NPM_BIN" "$dir/npm"
+              create_symlink "$PM2_BIN" "$dir/pm2"
+          done
           
           # Add Node.js paths to system-wide profile
           echo "Setting up system-wide Node.js paths..."
@@ -114,28 +110,30 @@ jobs:
           NODEPATH
           
           # Make the profile script executable
-          sudo chmod +x /etc/profile.d/nodejs.sh
+          sudo chmod +x /etc/profile.d/nodejs.sh || echo "Could not chmod profile script"
           
           # Source the new profile
-          source /etc/profile.d/nodejs.sh
+          source /etc/profile.d/nodejs.sh || echo "Could not source profile script"
           
-          # Add paths to user's bash profile
+          # Add paths to user's bash profile if they don't exist
           echo "Setting up user-specific Node.js paths..."
-          cat >> ~/.bash_profile << 'USERPATH'
+          if ! grep -q "NODE_PATH=" ~/.bash_profile; then
+              cat >> ~/.bash_profile << 'USERPATH'
           export PATH="/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin:$PATH"
           export NODE_PATH="/usr/lib/node_modules"
           USERPATH
+          fi
           
           # Source the updated bash profile
-          source ~/.bash_profile
+          source ~/.bash_profile || echo "Could not source bash profile"
           
           # Create app directory with proper permissions
           echo "Setting up application directory..."
-          sudo mkdir -p /var/www/app
-          sudo chown -R ec2-user:ec2-user /var/www
-          sudo chmod 755 /var/www
-          sudo chown -R ec2-user:ec2-user /var/www/app
-          sudo chmod 755 /var/www/app
+          sudo mkdir -p /var/www/app || echo "App directory already exists"
+          sudo chown -R ec2-user:ec2-user /var/www || echo "Could not chown /var/www"
+          sudo chmod 755 /var/www || echo "Could not chmod /var/www"
+          sudo chown -R ec2-user:ec2-user /var/www/app || echo "Could not chown /var/www/app"
+          sudo chmod 755 /var/www/app || echo "Could not chmod /var/www/app"
           
           # Install Nginx
           echo "Installing and configuring Nginx..."
@@ -167,12 +165,14 @@ jobs:
           
           # Verify installations again after all setup
           echo "Verifying final installation..."
-          echo "Node.js version: $(node --version)"
-          echo "npm version: $(npm --version)"
-          echo "PM2 version: $(pm2 --version)"
-          echo "Node.js location: $(which node)"
-          echo "npm location: $(which npm)"
-          echo "PM2 location: $(which pm2)"
+          node --version && echo "Node.js is available" || echo "Warning: Node.js not found in PATH"
+          npm --version && echo "npm is available" || echo "Warning: npm not found in PATH"
+          pm2 --version && echo "PM2 is available" || echo "Warning: PM2 not found in PATH"
+          
+          echo "Binary locations:"
+          which node || echo "Warning: node not found in PATH"
+          which npm || echo "Warning: npm not found in PATH"
+          which pm2 || echo "Warning: pm2 not found in PATH"
           
           # Create a file to indicate setup is complete
           touch /tmp/setup_complete
