@@ -37,7 +37,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '16'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
@@ -64,12 +64,12 @@ jobs:
           echo "Starting system setup..."
           
           # Update system
-          sudo yum update -y
+          sudo dnf update -y
           
-          # Install Node.js 16 (LTS version compatible with Amazon Linux 2)
+          # Install Node.js 18
           echo "Installing Node.js..."
-          curl -fsSL https://rpm.nodesource.com/setup_16.x | sudo bash -
-          sudo yum install -y nodejs
+          curl -fsSL https://rpm.nodesource.com/setup_18.x | sudo bash -
+          sudo dnf install -y nodejs
           
           # Verify Node.js installation
           echo "Verifying Node.js installation..."
@@ -96,7 +96,7 @@ jobs:
           
           # Install Nginx
           echo "Installing and configuring Nginx..."
-          sudo yum install -y nginx
+          sudo dnf install -y nginx
           
           # Configure Nginx
           sudo tee /etc/nginx/conf.d/app.conf << 'NGINX_EOF'
@@ -124,7 +124,7 @@ jobs:
           
           # Configure firewall
           echo "Configuring firewall..."
-          sudo yum install -y firewalld
+          sudo dnf install -y firewalld
           sudo systemctl start firewalld
           sudo systemctl enable firewalld
           sudo firewall-cmd --permanent --add-service=http
@@ -264,7 +264,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '16'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
