@@ -134,9 +134,20 @@ jobs:
           #!/bin/bash
           set -e  # Exit on any error
           
+          # Get EC2_IP from environment variable
+          EC2_IP="${EC2_IP:-localhost}"
+          
           echo "Starting deployment..."
           
           APP_DIR="/var/www/app"
+          REPO_URL="https://github.com/kranthi0987/eventdrivensystem.git"
+          BRANCH="main"
+          
+          # Install git if not present
+          if ! command -v git &> /dev/null; then
+              echo "Installing git..."
+              sudo yum install -y git
+          fi
           
           # Stop any existing application
           if sudo pm2 list | grep -q "app"; then
@@ -147,26 +158,28 @@ jobs:
           
           # Clean and prepare directory
           echo "Preparing application directory..."
-          sudo rm -rf ${APP_DIR}/*
-          
-          # Extract application files
-          echo "Extracting application files..."
-          cd /tmp
-          sudo unzip -o deploy.zip -d ${APP_DIR}/
-          
-          # Set correct permissions
-          echo "Setting permissions..."
+          sudo rm -rf ${APP_DIR}
+          sudo mkdir -p ${APP_DIR}
           sudo chown -R ec2-user:ec2-user ${APP_DIR}
           sudo chmod -R 755 ${APP_DIR}
           
+          # Clone the repository
+          echo "Cloning repository..."
+          cd ${APP_DIR}
+          sudo git clone -b ${BRANCH} ${REPO_URL} .
+          
           # Install dependencies
           echo "Installing dependencies..."
-          cd ${APP_DIR}
-          sudo npm ci --production
+          sudo npm install --omit=dev --no-audit --no-fund
+          
+          # Build the application if needed
+          if [ -f "package.json" ] && grep -q "\"build\"" "package.json"; then
+              echo "Building application..."
+              sudo npm run build
+          fi
           
           # Start application with PM2
           echo "Starting application..."
-          cd ${APP_DIR}
           sudo pm2 start npm --name "app" -- start
           sudo pm2 save
           
@@ -181,10 +194,19 @@ jobs:
           
           if sudo pm2 show app | grep -q "online"; then
               echo "Application deployed successfully!"
+              echo "Application is running at: http://${EC2_IP}"
+              
+              # Print PM2 status
+              echo "PM2 Status:"
+              sudo pm2 list
+              
               exit 0
           else
               echo "Deployment failed - application is not running"
+              echo "PM2 Logs:"
               sudo pm2 logs app --lines 50
+              echo "System Logs:"
+              sudo journalctl -n 50
               exit 1
           fi
           EOF
@@ -494,15 +516,11 @@ jobs:
           echo "Waiting for instance to be ready..."
           sleep 60
           
-          # Copy all necessary files
-          echo "Copying deployment files..."
+          # Copy setup script
+          echo "Copying setup script..."
           scp -o StrictHostKeyChecking=no \
             -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
-            scripts/setup.sh scripts/deploy.sh ${EC2_USER}@${EC2_IP}:/tmp/
-          
-          scp -o StrictHostKeyChecking=no \
-            -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
-            ${{ env.ZIP_FILE_NAME }} ${EC2_USER}@${EC2_IP}:/tmp/
+            scripts/setup.sh ${EC2_USER}@${EC2_IP}:/tmp/
           
           # Run setup first
           echo "Running setup script..."
@@ -510,14 +528,21 @@ jobs:
             -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
             ${EC2_USER}@${EC2_IP} 'sudo bash /tmp/setup.sh'
           
-          # Wait a bit for setup to complete
+          # Wait for setup to complete
           sleep 10
           
-          # Run deployment
+          # Copy and run deploy script with repository details
+          echo "Copying deploy script..."
+          scp -o StrictHostKeyChecking=no \
+            -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
+            scripts/deploy.sh ${EC2_USER}@${EC2_IP}:/tmp/
+          
+          # Run deployment with EC2_IP environment variable
           echo "Running deployment script..."
           ssh -o StrictHostKeyChecking=no \
             -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
-            ${EC2_USER}@${EC2_IP} 'sudo bash /tmp/deploy.sh'
+            ${EC2_USER}@${EC2_IP} \
+            "sudo EC2_IP='${EC2_IP}' REPO_URL='$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git' BRANCH='${GITHUB_REF_NAME}' bash /tmp/deploy.sh"
 
       - name: Verify deployment
         run: |
