@@ -135,18 +135,32 @@ jobs:
           #!/bin/bash
           set -e  # Exit on any error
           
+          # Source profile and set PATH
+          source ~/.bash_profile
+          source ~/.bashrc
+          
+          # Set PATH explicitly
+          export PATH="/usr/bin:/usr/local/bin:/bin:$PATH"
+          
+          # Print debug information
+          echo "Current PATH: $PATH"
+          echo "Node location: $(which node 2>/dev/null || echo 'node not found')"
+          echo "NPM location: $(which npm 2>/dev/null || echo 'npm not found')"
+          
           # Check if setup is complete
           if [ ! -f "/tmp/setup_complete" ]; then
               echo "Setup not complete. Please run setup.sh first"
               exit 1
           fi
           
-          # Ensure we have the correct PATH
-          export PATH="/usr/local/bin:/usr/bin:$PATH"
-          
           # Verify Node.js and npm are available
-          if ! command -v node > /dev/null || ! command -v npm > /dev/null; then
-              echo "Node.js or npm not found. Please ensure setup.sh completed successfully"
+          if ! command -v node > /dev/null; then
+              echo "Node.js not found in PATH: $PATH"
+              exit 1
+          fi
+          
+          if ! command -v npm > /dev/null; then
+              echo "npm not found in PATH: $PATH"
               exit 1
           fi
           
@@ -178,27 +192,27 @@ jobs:
           # Install dependencies
           echo "Installing dependencies..."
           cd ${APP_DIR}
-          npm ci --production
+          /usr/bin/npm ci --production
           
           # Start application
           echo "Starting application..."
-          pm2 start npm --name "app" -- start
-          pm2 save
+          /usr/bin/pm2 start /usr/bin/npm --name "app" -- start
+          /usr/bin/pm2 save
           
           # Setup PM2 startup script
           echo "Setting up PM2 startup..."
-          sudo env PATH=$PATH pm2 startup systemd -u ec2-user --hp /home/ec2-user
+          sudo env PATH=$PATH /usr/bin/pm2 startup systemd -u ec2-user --hp /home/ec2-user
           
           # Verify application is running
           echo "Verifying application status..."
           sleep 10
           
-          if pm2 show app | grep -q "online"; then
+          if /usr/bin/pm2 show app | grep -q "online"; then
               echo "Application deployed successfully!"
               exit 0
           else
               echo "Deployment failed - application is not running"
-              pm2 logs app --lines 50
+              /usr/bin/pm2 logs app --lines 50
               exit 1
           fi
           EOF
@@ -522,16 +536,16 @@ jobs:
           echo "Running setup script..."
           ssh -o StrictHostKeyChecking=no \
             -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
-            ${EC2_USER}@${EC2_IP} 'chmod +x /tmp/setup.sh && /tmp/setup.sh'
+            ${EC2_USER}@${EC2_IP} 'bash -l -c "chmod +x /tmp/setup.sh && /tmp/setup.sh"'
           
           # Wait a bit for setup to complete
           sleep 10
           
-          # Run deployment
+          # Run deployment with login shell to ensure proper environment
           echo "Running deployment script..."
           ssh -o StrictHostKeyChecking=no \
             -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
-            ${EC2_USER}@${EC2_IP} 'chmod +x /tmp/deploy.sh && /tmp/deploy.sh'
+            ${EC2_USER}@${EC2_IP} 'bash -l -c "chmod +x /tmp/deploy.sh && /tmp/deploy.sh"'
 
       - name: Verify deployment
         run: |
