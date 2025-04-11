@@ -64,12 +64,12 @@ jobs:
           echo "Starting system setup..."
           
           # Update system
-          sudo dnf update -y
+          sudo yum update -y
           
           # Install Node.js 18
           echo "Installing Node.js..."
           curl -fsSL https://rpm.nodesource.com/setup_18.x | sudo bash -
-          sudo dnf install -y nodejs
+          sudo yum install -y nodejs
           
           # Verify Node.js installation
           echo "Verifying Node.js installation..."
@@ -96,7 +96,7 @@ jobs:
           
           # Install Nginx
           echo "Installing and configuring Nginx..."
-          sudo dnf install -y nginx
+          sudo yum install -y nginx
           
           # Configure Nginx
           sudo tee /etc/nginx/conf.d/app.conf << 'NGINX_EOF'
@@ -122,15 +122,6 @@ jobs:
           sudo systemctl enable nginx
           sudo systemctl start nginx
           
-          # Configure firewall
-          echo "Configuring firewall..."
-          sudo dnf install -y firewalld
-          sudo systemctl start firewalld
-          sudo systemctl enable firewalld
-          sudo firewall-cmd --permanent --add-service=http
-          sudo firewall-cmd --permanent --add-service=https
-          sudo firewall-cmd --reload
-          
           echo "Setup completed successfully!"
           EOF
           
@@ -141,6 +132,10 @@ jobs:
           
           echo "Starting deployment..."
           
+          # Source the path to ensure we have access to npm
+          source ~/.bashrc
+          export PATH=$PATH:/usr/local/bin:/usr/bin
+          
           APP_DIR="/var/www/app"
           
           # Ensure directories exist with proper permissions
@@ -149,21 +144,18 @@ jobs:
           sudo chown -R ec2-user:ec2-user ${APP_DIR}
           sudo chmod 755 ${APP_DIR}
           
-          # Ensure PM2 is available
-          export PATH=$PATH:/usr/local/bin:/usr/bin
-          
           echo "Stopping existing application..."
           if command -v pm2 &> /dev/null; then
-            sudo env PATH=$PATH pm2 stop app || true
-            sudo env PATH=$PATH pm2 delete app || true
+            pm2 stop app || true
+            pm2 delete app || true
           fi
           
           echo "Cleaning up old files..."
-          sudo rm -rf ${APP_DIR}/*
+          rm -rf ${APP_DIR}/*
           
           echo "Extracting new files..."
           cd /tmp
-          sudo unzip -o deploy.zip -d ${APP_DIR}/
+          unzip -o deploy.zip -d ${APP_DIR}/
           
           echo "Setting permissions..."
           sudo chown -R ec2-user:ec2-user ${APP_DIR}
@@ -174,21 +166,21 @@ jobs:
           npm ci --production
           
           echo "Starting application with PM2..."
-          sudo env PATH=$PATH:/usr/local/bin:/usr/bin pm2 start npm --name "app" -- start
-          sudo env PATH=$PATH:/usr/local/bin:/usr/bin pm2 save
+          pm2 start npm --name "app" -- start
+          pm2 save
           
           echo "Setting up PM2 startup script..."
-          sudo env PATH=$PATH:/usr/local/bin:/usr/bin pm2 startup systemd -u ec2-user --hp /home/ec2-user
+          sudo env PATH=$PATH pm2 startup systemd -u ec2-user --hp /home/ec2-user
           
           echo "Checking application status..."
-          sleep 10  # Wait longer for the application to start
+          sleep 10  # Wait for the application to start
           
-          if sudo env PATH=$PATH:/usr/local/bin:/usr/bin pm2 show app | grep -q "online"; then
+          if pm2 show app | grep -q "online"; then
             echo "Application deployed successfully!"
             exit 0
           else
             echo "Deployment failed - application is not running"
-            sudo env PATH=$PATH:/usr/local/bin:/usr/bin pm2 logs app
+            pm2 logs app
             exit 1
           fi
           EOF
@@ -495,46 +487,27 @@ jobs:
           
           echo "EC2 Instance IP: ${EC2_IP}"
           
-          # Verify SSH key exists and has correct permissions
-          echo "Checking SSH key..."
-          ls -la ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key
-          chmod 600 ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key
-          
           echo "Waiting for instance to be ready..."
           sleep 60
           
-          # Verify files exist before copying
-          echo "Verifying files exist..."
-          ls -la ${{ env.ZIP_FILE_NAME }} scripts/setup.sh scripts/deploy.sh
+          echo "Running setup script..."
+          ssh -o StrictHostKeyChecking=no \
+            -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
+            ${EC2_USER}@${EC2_IP} 'bash -s' < scripts/setup.sh
           
-          echo "Copying files to EC2..."
-          # Copy files one by one to better identify issues
-          scp -v -o StrictHostKeyChecking=no \
+          echo "Copying deployment package..."
+          scp -o StrictHostKeyChecking=no \
             -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
             ${{ env.ZIP_FILE_NAME }} ${EC2_USER}@${EC2_IP}:/tmp/
           
-          scp -v -o StrictHostKeyChecking=no \
-            -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
-            scripts/setup.sh ${EC2_USER}@${EC2_IP}:/tmp/
-            
-          scp -v -o StrictHostKeyChecking=no \
+          echo "Running deployment script..."
+          scp -o StrictHostKeyChecking=no \
             -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
             scripts/deploy.sh ${EC2_USER}@${EC2_IP}:/tmp/
           
-          echo "Making scripts executable..."
-          ssh -v -o StrictHostKeyChecking=no \
+          ssh -o StrictHostKeyChecking=no \
             -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
-            ${EC2_USER}@${EC2_IP} 'chmod +x /tmp/setup.sh /tmp/deploy.sh'
-          
-          echo "Running setup script..."
-          ssh -v -o StrictHostKeyChecking=no \
-            -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
-            ${EC2_USER}@${EC2_IP} 'sudo /tmp/setup.sh'
-          
-          echo "Running deployment script..."
-          ssh -v -o StrictHostKeyChecking=no \
-            -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
-            ${EC2_USER}@${EC2_IP} '/tmp/deploy.sh'
+            ${EC2_USER}@${EC2_IP} 'chmod +x /tmp/deploy.sh && /tmp/deploy.sh'
 
       - name: Verify deployment
         run: |
