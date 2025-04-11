@@ -79,11 +79,18 @@ jobs:
           # Install PM2 globally and ensure it's in PATH
           echo "Installing PM2..."
           sudo npm install -g pm2@latest
-          sudo ln -sf /usr/local/bin/pm2 /usr/bin/pm2
           
-          # Create app directory and set permissions
+          # Ensure binary paths are available
+          sudo ln -sf /usr/local/bin/pm2 /usr/bin/pm2
+          sudo ln -sf /usr/local/bin/node /usr/bin/node
+          sudo ln -sf /usr/local/bin/npm /usr/bin/npm
+          
+          # Create app directory with proper permissions
           echo "Setting up application directory..."
+          sudo mkdir -p /var/www
           sudo mkdir -p /var/www/app
+          sudo chown -R ec2-user:ec2-user /var/www
+          sudo chmod 755 /var/www
           sudo chown -R ec2-user:ec2-user /var/www/app
           sudo chmod 755 /var/www/app
           
@@ -136,6 +143,12 @@ jobs:
           
           APP_DIR="/var/www/app"
           
+          # Ensure directories exist with proper permissions
+          echo "Ensuring directory structure..."
+          sudo mkdir -p ${APP_DIR}
+          sudo chown -R ec2-user:ec2-user ${APP_DIR}
+          sudo chmod 755 ${APP_DIR}
+          
           # Ensure PM2 is available
           export PATH=$PATH:/usr/local/bin:/usr/bin
           
@@ -149,10 +162,12 @@ jobs:
           sudo rm -rf ${APP_DIR}/*
           
           echo "Extracting new files..."
-          sudo unzip -o /tmp/deploy.zip -d ${APP_DIR}
+          cd /tmp
+          sudo unzip -o deploy.zip -d ${APP_DIR}/
           
           echo "Setting permissions..."
           sudo chown -R ec2-user:ec2-user ${APP_DIR}
+          sudo chmod -R 755 ${APP_DIR}
           
           echo "Installing dependencies..."
           cd ${APP_DIR}
