@@ -80,10 +80,54 @@ jobs:
           echo "Installing PM2..."
           sudo npm install -g pm2@latest
           
-          # Ensure binary paths are available
-          sudo ln -sf /usr/local/bin/pm2 /usr/bin/pm2
-          sudo ln -sf /usr/local/bin/node /usr/bin/node
-          sudo ln -sf /usr/local/bin/npm /usr/bin/npm
+          # Create all necessary directories for binaries
+          sudo mkdir -p /usr/local/bin
+          sudo mkdir -p /usr/bin
+          sudo mkdir -p /usr/local/sbin
+          sudo mkdir -p /usr/sbin
+          
+          # Ensure binary paths are available in all possible locations
+          echo "Setting up binary links..."
+          # Node.js binaries
+          sudo ln -sf $(which node) /usr/local/bin/node
+          sudo ln -sf $(which node) /usr/bin/node
+          sudo ln -sf $(which node) /usr/local/sbin/node
+          sudo ln -sf $(which node) /usr/sbin/node
+          
+          # npm binaries
+          sudo ln -sf $(which npm) /usr/local/bin/npm
+          sudo ln -sf $(which npm) /usr/bin/npm
+          sudo ln -sf $(which npm) /usr/local/sbin/npm
+          sudo ln -sf $(which npm) /usr/sbin/npm
+          
+          # PM2 binaries
+          sudo ln -sf $(which pm2) /usr/local/bin/pm2
+          sudo ln -sf $(which pm2) /usr/bin/pm2
+          sudo ln -sf $(which pm2) /usr/local/sbin/pm2
+          sudo ln -sf $(which pm2) /usr/sbin/pm2
+          
+          # Add Node.js paths to system-wide profile
+          echo "Setting up system-wide Node.js paths..."
+          sudo tee /etc/profile.d/nodejs.sh << 'NODEPATH'
+          export PATH="/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin:$PATH"
+          export NODE_PATH="/usr/lib/node_modules"
+          NODEPATH
+          
+          # Make the profile script executable
+          sudo chmod +x /etc/profile.d/nodejs.sh
+          
+          # Source the new profile
+          source /etc/profile.d/nodejs.sh
+          
+          # Add paths to user's bash profile
+          echo "Setting up user-specific Node.js paths..."
+          cat >> ~/.bash_profile << 'USERPATH'
+          export PATH="/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin:$PATH"
+          export NODE_PATH="/usr/lib/node_modules"
+          USERPATH
+          
+          # Source the updated bash profile
+          source ~/.bash_profile
           
           # Create app directory with proper permissions
           echo "Setting up application directory..."
@@ -120,6 +164,15 @@ jobs:
           # Start Nginx
           sudo systemctl enable nginx
           sudo systemctl start nginx
+          
+          # Verify installations again after all setup
+          echo "Verifying final installation..."
+          echo "Node.js version: $(node --version)"
+          echo "npm version: $(npm --version)"
+          echo "PM2 version: $(pm2 --version)"
+          echo "Node.js location: $(which node)"
+          echo "npm location: $(which npm)"
+          echo "PM2 location: $(which pm2)"
           
           # Create a file to indicate setup is complete
           touch /tmp/setup_complete
