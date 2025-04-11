@@ -59,14 +59,6 @@ jobs:
           # Create setup script
           cat > scripts/setup.sh << 'EOF'
           #!/bin/bash
-          set -e  # Exit on any error
-          
-          # Function to create symlink without failing if target exists
-          create_symlink() {
-              local source=$1
-              local target=$2
-              sudo ln -sf "$source" "$target" || echo "Note: Could not create link from $source to $target (may already exist)"
-          }
           
           echo "Starting system setup..."
           
@@ -78,62 +70,21 @@ jobs:
           curl -fsSL https://rpm.nodesource.com/setup_18.x | sudo bash -
           sudo yum install -y nodejs
           
-          # Get the actual binary paths
-          NODE_BIN=$(which node || echo "/usr/bin/node")
-          NPM_BIN=$(which npm || echo "/usr/bin/npm")
+          # Create a system-wide npm configuration
+          sudo mkdir -p /root/.npm
+          sudo chown -R root:root /root/.npm
           
-          # Install PM2 globally and ensure it's in PATH
+          # Install PM2 globally as root
           echo "Installing PM2..."
           sudo npm install -g pm2@latest
-          PM2_BIN=$(which pm2 || echo "/usr/bin/pm2")
-          
-          # Create all necessary directories for binaries
-          echo "Creating binary directories..."
-          for dir in "/usr/local/bin" "/usr/bin" "/usr/local/sbin" "/usr/sbin"; do
-              sudo mkdir -p "$dir" || echo "Directory $dir already exists"
-          done
-          
-          # Ensure binary paths are available in all possible locations
-          echo "Setting up binary links..."
-          # Node.js binaries
-          for dir in "/usr/local/bin" "/usr/bin" "/usr/local/sbin" "/usr/sbin"; do
-              create_symlink "$NODE_BIN" "$dir/node"
-              create_symlink "$NPM_BIN" "$dir/npm"
-              create_symlink "$PM2_BIN" "$dir/pm2"
-          done
-          
-          # Add Node.js paths to system-wide profile
-          echo "Setting up system-wide Node.js paths..."
-          sudo tee /etc/profile.d/nodejs.sh << 'NODEPATH'
-          export PATH="/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin:$PATH"
-          export NODE_PATH="/usr/lib/node_modules"
-          NODEPATH
-          
-          # Make the profile script executable
-          sudo chmod +x /etc/profile.d/nodejs.sh || echo "Could not chmod profile script"
-          
-          # Source the new profile
-          source /etc/profile.d/nodejs.sh || echo "Could not source profile script"
-          
-          # Add paths to user's bash profile if they don't exist
-          echo "Setting up user-specific Node.js paths..."
-          if ! grep -q "NODE_PATH=" ~/.bash_profile; then
-              cat >> ~/.bash_profile << 'USERPATH'
-          export PATH="/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin:$PATH"
-          export NODE_PATH="/usr/lib/node_modules"
-          USERPATH
-          fi
-          
-          # Source the updated bash profile
-          source ~/.bash_profile || echo "Could not source bash profile"
           
           # Create app directory with proper permissions
           echo "Setting up application directory..."
-          sudo mkdir -p /var/www/app || echo "App directory already exists"
-          sudo chown -R ec2-user:ec2-user /var/www || echo "Could not chown /var/www"
-          sudo chmod 755 /var/www || echo "Could not chmod /var/www"
-          sudo chown -R ec2-user:ec2-user /var/www/app || echo "Could not chown /var/www/app"
-          sudo chmod 755 /var/www/app || echo "Could not chmod /var/www/app"
+          sudo mkdir -p /var/www/app
+          sudo chown -R ec2-user:ec2-user /var/www
+          sudo chmod 755 /var/www
+          sudo chown -R ec2-user:ec2-user /var/www/app
+          sudo chmod 755 /var/www/app
           
           # Install Nginx
           echo "Installing and configuring Nginx..."
@@ -163,16 +114,11 @@ jobs:
           sudo systemctl enable nginx
           sudo systemctl start nginx
           
-          # Verify installations again after all setup
-          echo "Verifying final installation..."
-          node --version && echo "Node.js is available" || echo "Warning: Node.js not found in PATH"
-          npm --version && echo "npm is available" || echo "Warning: npm not found in PATH"
-          pm2 --version && echo "PM2 is available" || echo "Warning: PM2 not found in PATH"
-          
-          echo "Binary locations:"
-          which node || echo "Warning: node not found in PATH"
-          which npm || echo "Warning: npm not found in PATH"
-          which pm2 || echo "Warning: pm2 not found in PATH"
+          # Verify installations
+          echo "Verifying installation..."
+          sudo node --version
+          sudo npm --version
+          sudo pm2 --version
           
           # Create a file to indicate setup is complete
           touch /tmp/setup_complete
@@ -188,54 +134,25 @@ jobs:
           #!/bin/bash
           set -e  # Exit on any error
           
-          # Source profile and set PATH
-          source ~/.bash_profile
-          source ~/.bashrc
-          
-          # Set PATH explicitly
-          export PATH="/usr/bin:/usr/local/bin:/bin:$PATH"
-          
-          # Print debug information
-          echo "Current PATH: $PATH"
-          echo "Node location: $(which node 2>/dev/null || echo 'node not found')"
-          echo "NPM location: $(which npm 2>/dev/null || echo 'npm not found')"
-          
-          # Check if setup is complete
-          if [ ! -f "/tmp/setup_complete" ]; then
-              echo "Setup not complete. Please run setup.sh first"
-              exit 1
-          fi
-          
-          # Verify Node.js and npm are available
-          if ! command -v node > /dev/null; then
-              echo "Node.js not found in PATH: $PATH"
-              exit 1
-          fi
-          
-          if ! command -v npm > /dev/null; then
-              echo "npm not found in PATH: $PATH"
-              exit 1
-          fi
-          
           echo "Starting deployment..."
           
           APP_DIR="/var/www/app"
           
           # Stop any existing application
-          if command -v pm2 > /dev/null; then
+          if sudo pm2 list | grep -q "app"; then
               echo "Stopping existing application..."
-              pm2 stop app || true
-              pm2 delete app || true
+              sudo pm2 stop app || true
+              sudo pm2 delete app || true
           fi
           
           # Clean and prepare directory
           echo "Preparing application directory..."
-          rm -rf ${APP_DIR}/*
+          sudo rm -rf ${APP_DIR}/*
           
           # Extract application files
           echo "Extracting application files..."
           cd /tmp
-          unzip -o deploy.zip -d ${APP_DIR}/
+          sudo unzip -o deploy.zip -d ${APP_DIR}/
           
           # Set correct permissions
           echo "Setting permissions..."
@@ -245,27 +162,29 @@ jobs:
           # Install dependencies
           echo "Installing dependencies..."
           cd ${APP_DIR}
-          /usr/bin/npm ci --production
+          sudo npm ci --production
           
-          # Start application
+          # Start application with PM2
           echo "Starting application..."
-          /usr/bin/pm2 start /usr/bin/npm --name "app" -- start
-          /usr/bin/pm2 save
+          cd ${APP_DIR}
+          sudo pm2 start npm --name "app" -- start
+          sudo pm2 save
           
           # Setup PM2 startup script
           echo "Setting up PM2 startup..."
-          sudo env PATH=$PATH /usr/bin/pm2 startup systemd -u ec2-user --hp /home/ec2-user
+          sudo pm2 startup systemd -u root --hp /root
+          sudo pm2 save
           
           # Verify application is running
           echo "Verifying application status..."
           sleep 10
           
-          if /usr/bin/pm2 show app | grep -q "online"; then
+          if sudo pm2 show app | grep -q "online"; then
               echo "Application deployed successfully!"
               exit 0
           else
               echo "Deployment failed - application is not running"
-              /usr/bin/pm2 logs app --lines 50
+              sudo pm2 logs app --lines 50
               exit 1
           fi
           EOF
@@ -589,16 +508,16 @@ jobs:
           echo "Running setup script..."
           ssh -o StrictHostKeyChecking=no \
             -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
-            ${EC2_USER}@${EC2_IP} 'bash -l -c "chmod +x /tmp/setup.sh && /tmp/setup.sh"'
+            ${EC2_USER}@${EC2_IP} 'sudo bash /tmp/setup.sh'
           
           # Wait a bit for setup to complete
           sleep 10
           
-          # Run deployment with login shell to ensure proper environment
+          # Run deployment
           echo "Running deployment script..."
           ssh -o StrictHostKeyChecking=no \
             -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
-            ${EC2_USER}@${EC2_IP} 'bash -l -c "chmod +x /tmp/deploy.sh && /tmp/deploy.sh"'
+            ${EC2_USER}@${EC2_IP} 'sudo bash /tmp/deploy.sh'
 
       - name: Verify deployment
         run: |
