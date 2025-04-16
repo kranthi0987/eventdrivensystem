@@ -17,6 +17,17 @@ variable "key_name" {
   default     = "eventdrivensystem-key"
 }
 
+variable "github_repository_url" {
+  description = "GitHub repository URL"
+  type        = string
+}
+
+variable "elastic_beanstalk_app_name" {
+  description = "Elastic Beanstalk application name"
+  type        = string
+  default     = "eventdrivensystem-app"
+}
+
 # VPC Configuration
 variable "vpc_cidr" {
   description = "VPC CIDR block"
@@ -27,13 +38,13 @@ variable "vpc_cidr" {
 variable "availability_zones" {
   description = "Availability zones"
   type        = list(string)
-  default     = ["ap-south-1a", "ap-south-1b"]
+  default     = ["ap-south-1a"]
 }
 
 variable "public_subnet_cidrs" {
   description = "Public subnet CIDR blocks"
   type        = list(string)
-  default     = ["10.0.1.0/24", "10.0.2.0/24"]
+  default     = ["10.0.1.0/24"]
 }
 
 variable "private_subnet_cidrs" {

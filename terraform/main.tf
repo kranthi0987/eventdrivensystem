@@ -4,6 +4,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 4.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
   }
 }
 
@@ -11,9 +15,16 @@ provider "aws" {
   region = var.aws_region
 }
 
+# Generate random string for bucket name
+resource "random_string" "suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}
+
 # Create S3 bucket for storing key pair
 resource "aws_s3_bucket" "keys" {
-  bucket = "${var.project_name}-keys"
+  bucket = "${var.project_name}-keys-${random_string.suffix.result}"
 }
 
 # Enable server-side encryption
@@ -39,7 +50,7 @@ resource "tls_private_key" "ec2_key" {
   rsa_bits  = 4096
 }
 
-# Import existing key pair instead of creating new one
+# Import existing key pair
 resource "aws_key_pair" "app" {
   key_name   = var.key_name
   public_key = tls_private_key.ec2_key.public_key_openssh
