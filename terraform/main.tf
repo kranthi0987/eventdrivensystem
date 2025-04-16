@@ -25,9 +25,14 @@ resource "random_string" "suffix" {
 # Create S3 bucket for storing key pair
 resource "aws_s3_bucket" "keys" {
   bucket = "${var.project_name}-keys-${random_string.suffix.result}"
+}
 
-  # Disable ACLs and use bucket policy instead
-  object_ownership = "BucketOwnerEnforced"
+# Set bucket ownership controls
+resource "aws_s3_bucket_ownership_controls" "keys" {
+  bucket = aws_s3_bucket.keys.id
+  rule {
+    object_ownership = "BucketOwnerEnforced"
+  }
 }
 
 # Enable server-side encryption

@@ -29,17 +29,6 @@ variable "key_name" {
   default     = "eventdrivensystem-key"
 }
 
-variable "github_repository_url" {
-  description = "GitHub repository URL"
-  type        = string
-}
-
-variable "elastic_beanstalk_app_name" {
-  description = "Elastic Beanstalk application name"
-  type        = string
-  default     = "eventdrivensystem-app"
-}
-
 # VPC Configuration
 variable "vpc_cidr" {
   description = "VPC CIDR block"
@@ -62,26 +51,7 @@ variable "public_subnet_cidrs" {
 variable "private_subnet_cidrs" {
   description = "Private subnet CIDR blocks"
   type        = list(string)
-  default     = ["10.0.3.0/24", "10.0.4.0/24"]
-}
-
-# Auto Scaling Configuration
-variable "min_instances" {
-  description = "Minimum number of EC2 instances"
-  type        = number
-  default     = 1
-}
-
-variable "max_instances" {
-  description = "Maximum number of EC2 instances"
-  type        = number
-  default     = 2
-}
-
-variable "desired_instances" {
-  description = "Desired number of EC2 instances"
-  type        = number
-  default     = 1
+  default     = ["10.0.101.0/24"]
 }
 
 # Application Configuration
@@ -97,12 +67,75 @@ variable "instance_type" {
   default     = "t3.micro"
 }
 
+variable "min_instances" {
+  description = "Minimum number of instances"
+  type        = number
+  default     = 1
+}
+
+variable "max_instances" {
+  description = "Maximum number of instances"
+  type        = number
+  default     = 1
+}
+
+# CI/CD Configuration
+variable "github_repository_url" {
+  description = "GitHub repository URL"
+  type        = string
+}
+
+variable "github_repository_id" {
+  description = "GitHub repository ID"
+  type        = string
+}
+
+variable "branch_name" {
+  description = "Branch name"
+  type        = string
+  default     = "main"
+}
+
+# Redis Configuration
+variable "redis_node_type" {
+  description = "Redis node type"
+  type        = string
+  default     = "cache.t3.micro"
+}
+
+variable "redis_num_cache_nodes" {
+  description = "Number of Redis cache nodes"
+  type        = number
+  default     = 1
+}
+
+variable "redis_parameter_group_family" {
+  description = "Redis parameter group family"
+  type        = string
+  default     = "redis6.x"
+}
+
+variable "redis_port" {
+  description = "Redis port"
+  type        = number
+  default     = 6379
+}
+
+# Frontend Configuration
+variable "frontend_bucket_name" {
+  description = "Frontend S3 bucket name"
+  type        = string
+  default     = "event-monitor-frontend"
+}
+
 # Tags
 variable "tags" {
   description = "Tags to apply to resources"
   type        = map(string)
   default = {
     Environment = "production"
+    Project     = "eventdrivensystem"
     Terraform   = "true"
+    ManagedBy   = "terraform"
   }
 }
