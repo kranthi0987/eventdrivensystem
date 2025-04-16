@@ -87,6 +87,34 @@ jobs:
           echo "Waiting for instance to be ready..."
           sleep 60
           
+          # Function to check SSH connection
+          check_ssh() {
+            ssh -o StrictHostKeyChecking=no \
+              -o ConnectTimeout=10 \
+              -i ~/.ssh/ec2-key.pem \
+              ${EC2_USER}@${EC2_IP} \
+              "echo 'SSH connection successful'"
+          }
+          
+          # Retry SSH connection
+          MAX_RETRIES=5
+          RETRY_COUNT=0
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            if check_ssh; then
+              echo "SSH connection established"
+              break
+            else
+              echo "SSH connection attempt $((RETRY_COUNT + 1)) failed. Retrying in 30 seconds..."
+              sleep 30
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+            fi
+          done
+          
+          if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+            echo "Failed to establish SSH connection after $MAX_RETRIES attempts"
+            exit 1
+          fi
+          
           # Create deployment script
           cat > deploy.sh << 'EOF'
           #!/bin/bash
@@ -159,15 +187,55 @@ jobs:
           # Make script executable
           chmod +x deploy.sh
           
-          # Copy and run deployment script
-          scp -o StrictHostKeyChecking=no \
-            -i ~/.ssh/ec2-key.pem \
-            deploy.sh ${EC2_USER}@${EC2_IP}:/tmp/
+          # Function to copy and run deployment script with retry
+          deploy_with_retry() {
+            local retry_count=0
+            local max_retries=3
+            
+            while [ $retry_count -lt $max_retries ]; do
+              if scp -o StrictHostKeyChecking=no \
+                -o ConnectTimeout=10 \
+                -i ~/.ssh/ec2-key.pem \
+                deploy.sh ${EC2_USER}@${EC2_IP}:/tmp/; then
+                echo "Successfully copied deployment script"
+                break
+              else
+                echo "Failed to copy deployment script. Retrying in 30 seconds..."
+                sleep 30
+                retry_count=$((retry_count + 1))
+              fi
+            done
+            
+            if [ $retry_count -eq $max_retries ]; then
+              echo "Failed to copy deployment script after $max_retries attempts"
+              exit 1
+            fi
+            
+            # Run deployment script with retry
+            retry_count=0
+            while [ $retry_count -lt $max_retries ]; do
+              if ssh -o StrictHostKeyChecking=no \
+                -o ConnectTimeout=10 \
+                -i ~/.ssh/ec2-key.pem \
+                ${EC2_USER}@${EC2_IP} \
+                "GITHUB_REPOSITORY_URL='$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git' GITHUB_REF_NAME='$GITHUB_REF_NAME' APP_PORT='${{ env.APP_PORT }}' bash /tmp/deploy.sh"; then
+                echo "Deployment completed successfully"
+                break
+              else
+                echo "Deployment failed. Retrying in 30 seconds..."
+                sleep 30
+                retry_count=$((retry_count + 1))
+              fi
+            done
+            
+            if [ $retry_count -eq $max_retries ]; then
+              echo "Deployment failed after $max_retries attempts"
+              exit 1
+            fi
+          }
           
-          ssh -o StrictHostKeyChecking=no \
-            -i ~/.ssh/ec2-key.pem \
-            ${EC2_USER}@${EC2_IP} \
-            "GITHUB_REPOSITORY_URL='$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git' GITHUB_REF_NAME='$GITHUB_REF_NAME' APP_PORT='${{ env.APP_PORT }}' bash /tmp/deploy.sh"
+          # Execute deployment with retry
+          deploy_with_retry
 
       - name: Verify deployment
         run: |
