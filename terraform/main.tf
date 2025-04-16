@@ -14,19 +14,23 @@ provider "aws" {
 # Create S3 bucket for storing key pair
 resource "aws_s3_bucket" "keys" {
   bucket = "${var.project_name}-keys"
-  acl    = "private"
+}
 
-  server_side_encryption_configuration {
-    rule {
-      apply_server_side_encryption_by_default {
-        sse_algorithm = "AES256"
-      }
+# Enable server-side encryption
+resource "aws_s3_bucket_server_side_encryption_configuration" "keys" {
+  bucket = aws_s3_bucket.keys.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
     }
   }
+}
 
-  tags = merge(var.tags, {
-    Name = "${var.project_name}-keys-bucket"
-  })
+# Set bucket ACL
+resource "aws_s3_bucket_acl" "keys" {
+  bucket = aws_s3_bucket.keys.id
+  acl    = "private"
 }
 
 # Create EC2 key pair
@@ -35,17 +39,22 @@ resource "tls_private_key" "ec2_key" {
   rsa_bits  = 4096
 }
 
+# Import existing key pair instead of creating new one
 resource "aws_key_pair" "app" {
-  key_name   = "${var.project_name}-key"
+  key_name   = var.key_name
   public_key = tls_private_key.ec2_key.public_key_openssh
 
   tags = merge(var.tags, {
     Name = "${var.project_name}-key"
   })
+
+  lifecycle {
+    ignore_changes = [public_key]
+  }
 }
 
 # Store private key in S3
-resource "aws_s3_bucket_object" "private_key" {
+resource "aws_s3_object" "private_key" {
   bucket  = aws_s3_bucket.keys.id
   key     = "ec2-key.pem"
   content = tls_private_key.ec2_key.private_key_pem
@@ -205,5 +214,5 @@ output "key_bucket_name" {
 }
 
 output "key_object_name" {
-  value = aws_s3_bucket_object.private_key.key
+  value = aws_s3_object.private_key.id
 } 

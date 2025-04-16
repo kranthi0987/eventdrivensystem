@@ -36,6 +36,31 @@ variable "public_subnet_cidrs" {
   default     = ["10.0.1.0/24", "10.0.2.0/24"]
 }
 
+variable "private_subnet_cidrs" {
+  description = "Private subnet CIDR blocks"
+  type        = list(string)
+  default     = ["10.0.3.0/24", "10.0.4.0/24"]
+}
+
+# Auto Scaling Configuration
+variable "min_instances" {
+  description = "Minimum number of EC2 instances"
+  type        = number
+  default     = 1
+}
+
+variable "max_instances" {
+  description = "Maximum number of EC2 instances"
+  type        = number
+  default     = 2
+}
+
+variable "desired_instances" {
+  description = "Desired number of EC2 instances"
+  type        = number
+  default     = 1
+}
+
 # Application Configuration
 variable "app_port" {
   description = "Application port"
