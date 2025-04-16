@@ -83,35 +83,52 @@ jobs:
           
           echo "EC2 Instance IP: ${EC2_IP}"
           
-          # Wait for instance to be ready
+          # Wait for instance to be ready (increased wait time)
           echo "Waiting for instance to be ready..."
-          sleep 60
+          sleep 120  # Increased from 60 to 120 seconds
           
-          # Function to check SSH connection
+          # Function to check SSH connection with detailed diagnostics
           check_ssh() {
-            ssh -o StrictHostKeyChecking=no \
-              -o ConnectTimeout=10 \
+            echo "Attempting SSH connection to ${EC2_IP}..."
+            ssh -v -o StrictHostKeyChecking=no \
+              -o ConnectTimeout=30 \
+              -o ServerAliveInterval=15 \
+              -o ServerAliveCountMax=3 \
               -i ~/.ssh/ec2-key.pem \
               ${EC2_USER}@${EC2_IP} \
               "echo 'SSH connection successful'"
           }
           
-          # Retry SSH connection
-          MAX_RETRIES=5
+          # Function to check security group
+          check_security_group() {
+            echo "Checking security group configuration..."
+            aws ec2 describe-security-groups \
+              --filters "Name=ip-permission.to-port,Values=22" \
+              --query "SecurityGroups[*].{GroupId:GroupId,GroupName:GroupName}" \
+              --output table
+          }
+          
+          # Check security group first
+          check_security_group
+          
+          # Retry SSH connection with increased attempts
+          MAX_RETRIES=10  # Increased from 5 to 10
           RETRY_COUNT=0
           while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
             if check_ssh; then
               echo "SSH connection established"
               break
             else
-              echo "SSH connection attempt $((RETRY_COUNT + 1)) failed. Retrying in 30 seconds..."
-              sleep 30
+              echo "SSH connection attempt $((RETRY_COUNT + 1)) failed. Retrying in 60 seconds..."
+              sleep 60  # Increased from 30 to 60 seconds
               RETRY_COUNT=$((RETRY_COUNT + 1))
             fi
           done
           
           if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
             echo "Failed to establish SSH connection after $MAX_RETRIES attempts"
+            echo "Checking instance status..."
+            aws ec2 describe-instance-status --instance-ids $(terraform output -state=${{ env.TERRAFORM_WORKING_DIR }}/terraform.tfstate -raw instance_id) --output table
             exit 1
           fi
           
@@ -190,18 +207,21 @@ jobs:
           # Function to copy and run deployment script with retry
           deploy_with_retry() {
             local retry_count=0
-            local max_retries=3
+            local max_retries=5  # Increased from 3 to 5
             
             while [ $retry_count -lt $max_retries ]; do
-              if scp -o StrictHostKeyChecking=no \
-                -o ConnectTimeout=10 \
+              echo "Attempting to copy deployment script (attempt $((retry_count + 1)) of $max_retries)..."
+              if scp -v -o StrictHostKeyChecking=no \
+                -o ConnectTimeout=30 \
+                -o ServerAliveInterval=15 \
+                -o ServerAliveCountMax=3 \
                 -i ~/.ssh/ec2-key.pem \
                 deploy.sh ${EC2_USER}@${EC2_IP}:/tmp/; then
                 echo "Successfully copied deployment script"
                 break
               else
-                echo "Failed to copy deployment script. Retrying in 30 seconds..."
-                sleep 30
+                echo "Failed to copy deployment script. Retrying in 60 seconds..."
+                sleep 60  # Increased from 30 to 60 seconds
                 retry_count=$((retry_count + 1))
               fi
             done
@@ -214,16 +234,19 @@ jobs:
             # Run deployment script with retry
             retry_count=0
             while [ $retry_count -lt $max_retries ]; do
-              if ssh -o StrictHostKeyChecking=no \
-                -o ConnectTimeout=10 \
+              echo "Attempting to run deployment script (attempt $((retry_count + 1)) of $max_retries)..."
+              if ssh -v -o StrictHostKeyChecking=no \
+                -o ConnectTimeout=30 \
+                -o ServerAliveInterval=15 \
+                -o ServerAliveCountMax=3 \
                 -i ~/.ssh/ec2-key.pem \
                 ${EC2_USER}@${EC2_IP} \
                 "GITHUB_REPOSITORY_URL='$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git' GITHUB_REF_NAME='$GITHUB_REF_NAME' APP_PORT='${{ env.APP_PORT }}' bash /tmp/deploy.sh"; then
                 echo "Deployment completed successfully"
                 break
               else
-                echo "Deployment failed. Retrying in 30 seconds..."
-                sleep 30
+                echo "Deployment failed. Retrying in 60 seconds..."
+                sleep 60  # Increased from 30 to 60 seconds
                 retry_count=$((retry_count + 1))
               fi
             done
