@@ -28,7 +28,7 @@ env:
   EC2_USER: ec2-user
 
 jobs:
-  build-backend:
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -52,43 +52,72 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Create deployment scripts
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.5.0"
+
+      - name: Initialize Terraform
+        working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
         run: |
-          mkdir -p scripts
+          terraform init
+
+      - name: Apply Terraform Configuration
+        working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
+        run: |
+          terraform apply -auto-approve \
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            -var="project_name=eventdrivensystem" \
+            -var="instance_type=t3.micro" \
+            -var="app_port=${{ env.APP_PORT }}"
+
+      - name: Deploy application
+        run: |
+          # Get EC2 instance IP
+          EC2_IP=$(terraform output -state=${{ env.TERRAFORM_WORKING_DIR }}/terraform.tfstate -raw instance_public_ip)
           
-          # Create setup script
-          cat > scripts/setup.sh << 'EOF'
+          echo "EC2 Instance IP: ${EC2_IP}"
+          
+          # Wait for instance to be ready
+          echo "Waiting for instance to be ready..."
+          sleep 60
+          
+          # Create deployment script
+          cat > deploy.sh << 'EOF'
           #!/bin/bash
-          
-          echo "Starting system setup..."
+          set -e
           
           # Update system
           sudo yum update -y
           
-          # Install Node.js 18
-          echo "Installing Node.js..."
+          # Install Node.js
           curl -fsSL https://rpm.nodesource.com/setup_18.x | sudo bash -
           sudo yum install -y nodejs
           
-          # Create a system-wide npm configuration
-          sudo mkdir -p /root/.npm
-          sudo chown -R root:root /root/.npm
+          # Install PM2
+          sudo npm install -g pm2
           
-          # Install PM2 globally as root
-          echo "Installing PM2..."
-          sudo npm install -g pm2@latest
-          
-          # Create app directory with proper permissions
-          echo "Setting up application directory..."
+          # Create app directory
           sudo mkdir -p /var/www/app
-          sudo chown -R ec2-user:ec2-user /var/www
-          sudo chmod 755 /var/www
           sudo chown -R ec2-user:ec2-user /var/www/app
-          sudo chmod 755 /var/www/app
           
-          # Install Nginx
-          echo "Installing and configuring Nginx..."
-          sudo yum install -y nginx
+          # Clone repository
+          cd /var/www/app
+          git clone $GITHUB_REPOSITORY_URL .
+          git checkout $GITHUB_REF_NAME
+          
+          # Install dependencies
+          npm install
+          
+          # Build application
+          npm run build
           
           # Configure Nginx
           sudo tee /etc/nginx/conf.d/app.conf << 'NGINX_EOF'
@@ -97,7 +126,7 @@ jobs:
               server_name _;
           
               location / {
-                  proxy_pass http://localhost:8081;
+                  proxy_pass http://localhost:$APP_PORT;
                   proxy_http_version 1.1;
                   proxy_set_header Upgrade $http_upgrade;
                   proxy_set_header Connection 'upgrade';
@@ -107,442 +136,27 @@ jobs:
           }
           NGINX_EOF
           
-          # Remove default nginx config
-          sudo rm -f /etc/nginx/conf.d/default.conf
-          
-          # Start Nginx
-          sudo systemctl enable nginx
-          sudo systemctl start nginx
-          
-          # Verify installations
-          echo "Verifying installation..."
-          sudo node --version
-          sudo npm --version
-          sudo pm2 --version
-          
-          # Create a file to indicate setup is complete
-          touch /tmp/setup_complete
-          
-          echo "Setup completed successfully!"
-          EOF
-          
-          chmod +x scripts/setup.sh
-
-      - name: Create separate deploy script
-        run: |
-          cat > scripts/deploy.sh << 'EOF'
-          #!/bin/bash
-          set -e  # Exit on any error
-          
-          # Get EC2_IP from environment variable
-          EC2_IP="${EC2_IP:-localhost}"
-          
-          echo "Starting deployment..."
-          
-          APP_DIR="/var/www/app"
-          REPO_URL="https://github.com/kranthi0987/eventdrivensystem.git"
-          BRANCH="main"
-          
-          # Install git if not present
-          if ! command -v git &> /dev/null; then
-              echo "Installing git..."
-              sudo yum install -y git
-          fi
-          
-          # Stop any existing application
-          if sudo pm2 list | grep -q "app"; then
-              echo "Stopping existing application..."
-              sudo pm2 stop app || true
-              sudo pm2 delete app || true
-          fi
-          
-          # Clean and prepare directory
-          echo "Preparing application directory..."
-          sudo rm -rf ${APP_DIR}
-          sudo mkdir -p ${APP_DIR}
-          sudo chown -R ec2-user:ec2-user ${APP_DIR}
-          sudo chmod -R 755 ${APP_DIR}
-          
-          # Clone the repository
-          echo "Cloning repository..."
-          cd ${APP_DIR}
-          sudo git clone -b ${BRANCH} ${REPO_URL} .
-          
-          # Install dependencies
-          echo "Installing dependencies..."
-          sudo npm install --omit=dev --no-audit --no-fund
-          
-          # Build the application if needed
-          if [ -f "package.json" ] && grep -q "\"build\"" "package.json"; then
-              echo "Building application..."
-              sudo npm run build
-          fi
-          
           # Start application with PM2
-          echo "Starting application..."
-          sudo pm2 start npm --name "app" -- start
-          sudo pm2 save
+          pm2 start npm --name "app" -- start
+          pm2 save
+          pm2 startup
           
-          # Setup PM2 startup script
-          echo "Setting up PM2 startup..."
-          sudo pm2 startup systemd -u root --hp /root
-          sudo pm2 save
-          
-          # Verify application is running
-          echo "Verifying application status..."
-          sleep 10
-          
-          if sudo pm2 show app | grep -q "online"; then
-              echo "Application deployed successfully!"
-              echo "Application is running at: http://${EC2_IP}"
-              
-              # Print PM2 status
-              echo "PM2 Status:"
-              sudo pm2 list
-              
-              exit 0
-          else
-              echo "Deployment failed - application is not running"
-              echo "PM2 Logs:"
-              sudo pm2 logs app --lines 50
-              echo "System Logs:"
-              sudo journalctl -n 50
-              exit 1
-          fi
+          # Restart Nginx
+          sudo systemctl restart nginx
           EOF
           
-          chmod +x scripts/deploy.sh
-
-      - name: Create default success page
-        run: |
-          mkdir -p public
-          cat > public/index.html << 'EOF'
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <title>Deployment Success</title>
-              <style>
-                body {
-                  font-family: Arial, sans-serif;
-                  margin: 40px;
-                  line-height: 1.6;
-                  text-align: center;
-                }
-                .container {
-                  max-width: 800px;
-                  margin: 0 auto;
-                  padding: 20px;
-                  border: 1px solid #ddd;
-                  border-radius: 5px;
-                }
-                .success {
-                  color: #28a745;
-                }
-              </style>
-            </head>
-            <body>
-              <div class="container">
-                <h1 class="success">✅ Deployment Successful!</h1>
-                <p>Your application has been successfully deployed.</p>
-                <p>Timestamp: $(date)</p>
-                <p>Region: ${AWS_REGION}</p>
-              </div>
-            </body>
-          </html>
-          EOF
-
-      - name: Zip deployment package
-        run: |
-          zip -r $ZIP_FILE_NAME . \
-            -x "*.git*" \
-            -x "node_modules/*" \
-            -x ".github/*" \
-            -x ".idea/*" \
-            -x "*.DS_Store" \
-            -x "apps/$FRONTEND_APP_NAME/*" \
-            -x "terraform/*" \
-            -i "public/*" \
-            -i "scripts/*"
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: deployment-package
-          path: |
-            ${{ env.ZIP_FILE_NAME }}
-            scripts/
-          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
-
-  build-frontend:
-    needs: build-backend
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: |
-          cd apps/event-monitor
-          npm ci
-
-      - name: Build frontend
-        run: |
-          cd apps/event-monitor
-          npm run build
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Create S3 Bucket if not exists
-        run: |
-            if ! aws s3 ls "s3://$S3_BUCKET_NAME" 2>&1 | grep -q 'NoSuchBucket'; then
-              echo "Syncing files to S3 bucket $S3_BUCKET_NAME"
-              aws s3 sync apps/event-monitor/dist s3://$S3_BUCKET_NAME --delete
-              aws s3 cp apps/event-monitor/dist/index.html s3://$S3_BUCKET_NAME/index.html --cache-control "no-cache,no-store,must-revalidate"
-              echo "Files synced successfully"
-            else
-              echo "Error: S3 bucket $S3_BUCKET_NAME does not exist. Creating it now..."
-              aws s3 mb "s3://$S3_BUCKET_NAME" --region ${{ env.AWS_REGION }}
-              
-              # Configure bucket policy for public read access
-              aws s3api put-bucket-policy \
-                --bucket $S3_BUCKET_NAME \
-                --policy '{
-                  "Version": "2012-10-17",
-                  "Statement": [
-                    {
-                      "Effect": "Allow",
-                      "Principal": "*",
-                      "Action": "s3:GetObject",
-                      "Resource": "arn:aws:s3:::'$S3_BUCKET_NAME'/*"
-                    }
-                  ]
-                }'
-              
-              # Enable static website hosting
-              aws s3 website "s3://$S3_BUCKET_NAME" \
-                --index-document index.html \
-                --error-document index.html
-                
-              echo "Bucket created, now syncing files..."
-              aws s3 sync apps/event-monitor/dist s3://$S3_BUCKET_NAME --delete
-              aws s3 cp apps/event-monitor/dist/index.html s3://$S3_BUCKET_NAME/index.html --cache-control "no-cache,no-store,must-revalidate"
-              echo "Files synced successfully"
-            fi
-
-  deploy-infrastructure:
-    needs: build-backend
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Download deployment package
-        uses: actions/download-artifact@v4
-        with:
-          name: deployment-package
-          path: .
-
-      - name: Upload to S3
-        run: |
-          aws s3api head-bucket --bucket "${TERRAFORM_STATE_BUCKET}" 2>/dev/null || \
-            aws s3 mb "s3://${TERRAFORM_STATE_BUCKET}" --region ${AWS_REGION}
+          # Make script executable
+          chmod +x deploy.sh
           
-          aws s3 cp ${{ env.ZIP_FILE_NAME }} \
-            "s3://${TERRAFORM_STATE_BUCKET}/${{ env.ZIP_FILE_NAME }}" \
-            --sse AES256
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "1.5.0"
-          terraform_wrapper: false
-
-      - name: Prepare Terraform Directory
-        run: |
-          echo "Creating Terraform working directory..."
-          mkdir -p ${{ env.TERRAFORM_WORKING_DIR }}
-          
-          echo "Generating SSH key..."
-          cd ${{ env.TERRAFORM_WORKING_DIR }}
-          ssh-keygen -t rsa -b 4096 -f ssh_key -N "" -C "ec2-user"
-          
-          echo "Creating variables file..."
-          cat > variables.tf << 'EOF'
-          variable "aws_region" {
-            type = string
-          }
-          variable "project_name" {
-            type = string
-          }
-          variable "environment" {
-            type = string
-          }
-          variable "instance_type" {
-            type = string
-          }
-          variable "app_port" {
-            type = number
-          }
-          variable "frontend_bucket_name" {
-            type = string
-          }
-          variable "vpc_cidr" {
-            type = string
-            default = "10.0.0.0/16"
-          }
-          variable "public_subnet_cidrs" {
-            type = list(string)
-            default = ["10.0.101.0/24", "10.0.102.0/24"]
-          }
-          variable "private_subnet_cidrs" {
-            type = list(string)
-            default = ["10.0.1.0/24", "10.0.2.0/24"]
-          }
-          variable "availability_zones" {
-            type = list(string)
-          }
-          variable "tags" {
-            type = map(string)
-            default = {
-              Environment = "production"
-              Terraform   = "true"
-            }
-          }
-          EOF
-
-      - name: Cleanup existing resources
-        run: |
-          echo "Cleaning up existing resources..."
-          aws ec2 delete-key-pair --key-name eventdrivensystem-key || true
-          
-          ROLE_NAME="eventdrivensystem-ec2-role"
-          INSTANCE_PROFILE="eventdrivensystem-ec2-profile"
-          
-          echo "Checking for existing IAM resources..."
-          
-          # Check and cleanup instance profile
-          if aws iam get-instance-profile --instance-profile-name $INSTANCE_PROFILE 2>/dev/null; then
-            echo "Removing role from instance profile..."
-            aws iam remove-role-from-instance-profile \
-              --instance-profile-name $INSTANCE_PROFILE \
-              --role-name $ROLE_NAME || true
-              
-            echo "Deleting instance profile..."
-            aws iam delete-instance-profile --instance-profile-name $INSTANCE_PROFILE || true
-          fi
-          
-          # Check and cleanup IAM role
-          if aws iam get-role --role-name $ROLE_NAME 2>/dev/null; then
-            echo "Detaching policies from role..."
-            for policy in $(aws iam list-attached-role-policies --role-name $ROLE_NAME --query 'AttachedPolicies[*].PolicyArn' --output text); do
-              echo "Detaching policy: $policy"
-              aws iam detach-role-policy --role-name $ROLE_NAME --policy-arn "$policy" || true
-            done
-            
-            echo "Deleting inline policies..."
-            for policy in $(aws iam list-role-policies --role-name $ROLE_NAME --query 'PolicyNames[*]' --output text); do
-              echo "Deleting inline policy: $policy"
-              aws iam delete-role-policy --role-name $ROLE_NAME --policy-name "$policy" || true
-            done
-            
-            echo "Deleting IAM role..."
-            aws iam delete-role --role-name $ROLE_NAME || true
-          fi
-          
-          echo "Waiting for IAM resources to be fully deleted..."
-          sleep 15
-          
-          echo "Cleanup completed"
-
-      - name: Initialize Terraform
-        working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
-        run: |
-          echo "Verifying Terraform installation..."
-          terraform version
-          
-          echo "Initializing Terraform..."
-          terraform init \
-            -backend=true \
-            -backend-config="bucket=${{ env.TERRAFORM_STATE_BUCKET }}" \
-            -backend-config="key=terraform.tfstate" \
-            -backend-config="region=${{ env.AWS_REGION }}"
-
-      - name: Import existing resources if they exist
-        working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
-        run: |
-          # Try to import existing role if cleanup failed
-          if aws iam get-role --role-name eventdrivensystem-ec2-role 2>/dev/null; then
-            echo "Importing existing IAM role..."
-            terraform import aws_iam_role.ec2_role eventdrivensystem-ec2-role || true
-          fi
-
-      - name: Apply Terraform Configuration
-        working-directory: ${{ env.TERRAFORM_WORKING_DIR }}
-        run: |
-          terraform apply -auto-approve \
-            -var="aws_region=${{ env.AWS_REGION }}" \
-            -var="project_name=eventdrivensystem" \
-            -var="environment=production" \
-            -var="instance_type=${{ env.INSTANCE_TYPE }}" \
-            -var="app_port=${{ env.APP_PORT }}" \
-            -var="frontend_bucket_name=${{ env.S3_BUCKET_NAME }}" \
-            -var="availability_zones=[\"${{ env.AWS_REGION }}a\",\"${{ env.AWS_REGION }}b\"]"
-
-      - name: Deploy application
-        run: |
-          # Get EC2 instance IP
-          EC2_IP=$(terraform output -state=${{ env.TERRAFORM_WORKING_DIR }}/terraform.tfstate -raw instance_public_ip)
-          
-          echo "EC2 Instance IP: ${EC2_IP}"
-          
-          echo "Waiting for instance to be ready..."
-          sleep 60
-          
-          # Copy setup script
-          echo "Copying setup script..."
+          # Copy and run deployment script
           scp -o StrictHostKeyChecking=no \
             -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
-            scripts/setup.sh ${EC2_USER}@${EC2_IP}:/tmp/
+            deploy.sh ${EC2_USER}@${EC2_IP}:/tmp/
           
-          # Run setup first
-          echo "Running setup script..."
-          ssh -o StrictHostKeyChecking=no \
-            -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
-            ${EC2_USER}@${EC2_IP} 'sudo bash /tmp/setup.sh'
-          
-          # Wait for setup to complete
-          sleep 10
-          
-          # Copy and run deploy script with repository details
-          echo "Copying deploy script..."
-          scp -o StrictHostKeyChecking=no \
-            -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
-            scripts/deploy.sh ${EC2_USER}@${EC2_IP}:/tmp/
-          
-          # Run deployment with EC2_IP environment variable
-          echo "Running deployment script..."
           ssh -o StrictHostKeyChecking=no \
             -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
             ${EC2_USER}@${EC2_IP} \
-            "sudo EC2_IP='${EC2_IP}' REPO_URL='$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git' BRANCH='${GITHUB_REF_NAME}' bash /tmp/deploy.sh"
+            "GITHUB_REPOSITORY_URL='$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git' GITHUB_REF_NAME='$GITHUB_REF_NAME' APP_PORT='${{ env.APP_PORT }}' bash /tmp/deploy.sh"
 
       - name: Verify deployment
         run: |
@@ -568,20 +182,4 @@ jobs:
           done
           
           echo "Application is not responding after $MAX_RETRIES attempts"
-          
-          # Get logs from the instance for debugging
-          echo "Fetching logs from instance..."
-          ssh -o StrictHostKeyChecking=no \
-            -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
-            ${EC2_USER}@${EC2_IP} '
-              echo "PM2 Status:"
-              sudo env PATH=$PATH:/usr/local/bin:/usr/bin pm2 list
-              echo "PM2 Logs:"
-              sudo env PATH=$PATH:/usr/local/bin:/usr/bin pm2 logs app --lines 100
-              echo "Nginx Status:"
-              sudo systemctl status nginx
-              echo "Nginx Logs:"
-              sudo cat /var/log/nginx/error.log
-            '
-          
           exit 1

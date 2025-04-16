@@ -11,7 +11,7 @@ provider "aws" {
   region = var.aws_region
 }
 
-# VPC and Network Configuration
+# VPC Configuration
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
   enable_dns_hostnames = true
@@ -59,12 +59,13 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
-# Security Group
+# Security Group for EC2 Instance
 resource "aws_security_group" "app" {
   name        = "${var.project_name}-app-sg"
   description = "Security group for application"
   vpc_id      = aws_vpc.main.id
 
+  # Allow HTTP traffic
   ingress {
     from_port   = 80
     to_port     = 80
@@ -73,6 +74,7 @@ resource "aws_security_group" "app" {
     description = "HTTP"
   }
 
+  # Allow SSH traffic
   ingress {
     from_port   = 22
     to_port     = 22
@@ -81,6 +83,7 @@ resource "aws_security_group" "app" {
     description = "SSH"
   }
 
+  # Allow application port
   ingress {
     from_port   = var.app_port
     to_port     = var.app_port
@@ -89,6 +92,7 @@ resource "aws_security_group" "app" {
     description = "Application port"
   }
 
+  # Allow all outbound traffic
   egress {
     from_port   = 0
     to_port     = 0
@@ -112,55 +116,12 @@ resource "aws_key_pair" "app" {
   })
 }
 
-# IAM Role for EC2
-resource "aws_iam_role" "ec2_role" {
-  name = "eventdrivensystem-ec2-role"
-  
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "ec2.amazonaws.com"
-        }
-      }
-    ]
-  })
-
-  # Add force_detach_policies to ensure clean deletion
-  force_detach_policies = true
-
-  # Add lifecycle rule to handle recreation
-  lifecycle {
-    create_before_destroy = true
-  }
-
-  tags = var.tags
-}
-
-resource "aws_iam_role_policy_attachment" "s3_access" {
-  role       = aws_iam_role.ec2_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
-}
-
-resource "aws_iam_instance_profile" "ec2_profile" {
-  name = "${var.project_name}-ec2-profile"
-  role = aws_iam_role.ec2_role.name
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
 # EC2 Instance
 resource "aws_instance" "app" {
   ami                    = data.aws_ami.amazon_linux_2023.id
   instance_type          = var.instance_type
   key_name              = aws_key_pair.app.key_name
   subnet_id             = aws_subnet.public.id
-  iam_instance_profile  = aws_iam_instance_profile.ec2_profile.name
   vpc_security_group_ids = [aws_security_group.app.id]
 
   root_block_device {
@@ -180,17 +141,6 @@ resource "aws_instance" "app" {
   tags = merge(var.tags, {
     Name = "${var.project_name}-app-server"
   })
-}
-
-# Latest Amazon Linux 2 AMI
-data "aws_ami" "amazon_linux_2" {
-  most_recent = true
-  owners      = ["amazon"]
-
-  filter {
-    name   = "name"
-    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
-  }
 }
 
 # Latest Amazon Linux 2023 AMI
