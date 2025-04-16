@@ -25,6 +25,9 @@ resource "random_string" "suffix" {
 # Create S3 bucket for storing key pair
 resource "aws_s3_bucket" "keys" {
   bucket = "${var.project_name}-keys-${random_string.suffix.result}"
+
+  # Disable ACLs and use bucket policy instead
+  object_ownership = "BucketOwnerEnforced"
 }
 
 # Enable server-side encryption
@@ -38,10 +41,28 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "keys" {
   }
 }
 
-# Set bucket ACL
-resource "aws_s3_bucket_acl" "keys" {
+# Bucket policy to ensure private access
+resource "aws_s3_bucket_policy" "keys" {
   bucket = aws_s3_bucket.keys.id
-  acl    = "private"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Deny"
+        Principal = "*"
+        Action = "s3:*"
+        Resource = [
+          aws_s3_bucket.keys.arn,
+          "${aws_s3_bucket.keys.arn}/*"
+        ]
+        Condition = {
+          Bool = {
+            "aws:SecureTransport" = "false"
+          }
+        }
+      }
+    ]
+  })
 }
 
 # Create EC2 key pair
@@ -191,7 +212,9 @@ resource "aws_instance" "app" {
               EOF
 
   tags = merge(var.tags, {
-    Name = "${var.project_name}-app-server"
+    Name        = "${var.project_name}-app-server"
+    Environment = var.environment
+    Application = var.app_name
   })
 }
 

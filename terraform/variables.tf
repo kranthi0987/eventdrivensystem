@@ -11,6 +11,18 @@ variable "project_name" {
   default     = "eventdrivensystem"
 }
 
+variable "app_name" {
+  description = "Application name"
+  type        = string
+  default     = "eventdrivensystem-app"
+}
+
+variable "environment" {
+  description = "Environment name"
+  type        = string
+  default     = "production"
+}
+
 variable "key_name" {
   description = "Name of the existing EC2 key pair"
   type        = string
