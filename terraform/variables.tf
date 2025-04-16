@@ -11,6 +11,11 @@ variable "project_name" {
   default     = "eventdrivensystem"
 }
 
+variable "key_name" {
+  description = "Name of the existing EC2 key pair"
+  type        = string
+}
+
 # VPC Configuration
 variable "vpc_cidr" {
   description = "VPC CIDR block"

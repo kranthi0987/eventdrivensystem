@@ -26,6 +26,7 @@ env:
   ARTIFACT_RETENTION_DAYS: 5
   APP_PORT: 8081
   EC2_USER: ec2-user
+  EC2_KEY_NAME: eventdrivensystem-key
 
 jobs:
   deploy:
@@ -77,6 +78,21 @@ jobs:
             -var="project_name=eventdrivensystem" \
             -var="instance_type=t3.micro" \
             -var="app_port=${{ env.APP_PORT }}"
+
+      - name: Download EC2 key from S3
+        run: |
+          # Get bucket and key names from Terraform output
+          BUCKET_NAME=$(terraform output -state=${{ env.TERRAFORM_WORKING_DIR }}/terraform.tfstate -raw key_bucket_name)
+          KEY_NAME=$(terraform output -state=${{ env.TERRAFORM_WORKING_DIR }}/terraform.tfstate -raw key_object_name)
+          
+          # Create .ssh directory if it doesn't exist
+          mkdir -p ~/.ssh
+          
+          # Download key from S3
+          aws s3 cp "s3://${BUCKET_NAME}/${KEY_NAME}" ~/.ssh/ec2-key.pem
+          
+          # Set proper permissions
+          chmod 400 ~/.ssh/ec2-key.pem
 
       - name: Deploy application
         run: |
@@ -150,11 +166,11 @@ jobs:
           
           # Copy and run deployment script
           scp -o StrictHostKeyChecking=no \
-            -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
+            -i ~/.ssh/ec2-key.pem \
             deploy.sh ${EC2_USER}@${EC2_IP}:/tmp/
           
           ssh -o StrictHostKeyChecking=no \
-            -i ${{ env.TERRAFORM_WORKING_DIR }}/ssh_key \
+            -i ~/.ssh/ec2-key.pem \
             ${EC2_USER}@${EC2_IP} \
             "GITHUB_REPOSITORY_URL='$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git' GITHUB_REF_NAME='$GITHUB_REF_NAME' APP_PORT='${{ env.APP_PORT }}' bash /tmp/deploy.sh"
 

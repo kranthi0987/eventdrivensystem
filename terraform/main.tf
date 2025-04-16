@@ -11,6 +11,48 @@ provider "aws" {
   region = var.aws_region
 }
 
+# Create S3 bucket for storing key pair
+resource "aws_s3_bucket" "keys" {
+  bucket = "${var.project_name}-keys"
+  acl    = "private"
+
+  server_side_encryption_configuration {
+    rule {
+      apply_server_side_encryption_by_default {
+        sse_algorithm = "AES256"
+      }
+    }
+  }
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-keys-bucket"
+  })
+}
+
+# Create EC2 key pair
+resource "tls_private_key" "ec2_key" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
+resource "aws_key_pair" "app" {
+  key_name   = "${var.project_name}-key"
+  public_key = tls_private_key.ec2_key.public_key_openssh
+
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-key"
+  })
+}
+
+# Store private key in S3
+resource "aws_s3_bucket_object" "private_key" {
+  bucket  = aws_s3_bucket.keys.id
+  key     = "ec2-key.pem"
+  content = tls_private_key.ec2_key.private_key_pem
+
+  server_side_encryption = "AES256"
+}
+
 # VPC Configuration
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
@@ -106,16 +148,6 @@ resource "aws_security_group" "app" {
   })
 }
 
-# SSH Key
-resource "aws_key_pair" "app" {
-  key_name   = "${var.project_name}-key"
-  public_key = file("${path.module}/ssh_key.pub")
-
-  tags = merge(var.tags, {
-    Name = "${var.project_name}-key"
-  })
-}
-
 # EC2 Instance
 resource "aws_instance" "app" {
   ami                    = data.aws_ami.amazon_linux_2023.id
@@ -166,4 +198,12 @@ output "instance_public_ip" {
 
 output "instance_public_dns" {
   value = aws_instance.app.public_dns
+}
+
+output "key_bucket_name" {
+  value = aws_s3_bucket.keys.id
+}
+
+output "key_object_name" {
+  value = aws_s3_bucket_object.private_key.key
 } 

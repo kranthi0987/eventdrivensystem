@@ -3,170 +3,186 @@
 ## High-Level Design (HLD)
 
 ### System Overview
-The system is designed to bridge communication between a source application and a target application, handling event transformation and rate limiting while ensuring reliability and observability.
+The system is designed as a scalable, event-driven microservice architecture that handles event processing, transformation, and delivery between source and target applications. The system ensures reliability, security, and observability while maintaining high performance.
 
 ### System Components
-1. **Source Application**
-   - Generates events with structure: `{ id, name, body, timestamp }`
-   - Requires 500ms response time with 2xx status
-   - No retry mechanism
-   - Authenticates using JWT tokens
+1. **Frontend Application**
+   - React-based event monitoring dashboard
+   - Real-time event visualization
+   - Event filtering and search
+   - Performance metrics display
 
-2. **Bridge Service**
-   - Core event processing service
-   - Handles event transformation
-   - Implements rate limiting (5 events per second)
-   - Provides monitoring and tracing
-   - Uses Bull queue for reliable event processing
+2. **Backend Service**
+   - Node.js/Express API server
+   - Event processing and transformation
+   - Rate limiting implementation
+   - Health monitoring and metrics
+   - JWT-based authentication
 
-3. **Target Application**
-   - GraphQL API endpoint
-   - Rate-limited consumer
-   - Requires enhanced event structure with `brand` field
-   - Authenticates bridge service using JWT tokens
+3. **Infrastructure**
+   - AWS EC2 instance for backend
+   - S3 bucket for frontend hosting
+   - VPC with public subnet
+   - Security groups for network isolation
+   - CloudWatch for monitoring
 
 ### System Architecture Diagram
 ```mermaid
 graph TB
-    subgraph Source["Source Application"]
-        SA[Event Generator]
-        Auth[Auth Service]
+    subgraph Frontend["Frontend Layer"]
+        React[React App]
+        S3[S3 Hosting]
+        CloudFront[CloudFront CDN]
     end
     
-    subgraph Bridge["Bridge Service"]
-        API[Express API]
+    subgraph Backend["Backend Layer"]
+        Express[Express API]
         JWT[JWT Auth]
-        Queue[Bull Queue]
-        Worker[Event Worker]
         Rate[Rate Limiter]
-        Monitor[Console Logging]
+        Monitor[Monitoring]
     end
     
-    subgraph Target["Target Application"]
-        TA[GraphQL API]
-        Auth2[JWT Auth]
+    subgraph Infrastructure["Infrastructure Layer"]
+        EC2[EC2 Instance]
+        VPC[VPC]
+        SG[Security Groups]
+        CW[CloudWatch]
     end
     
-    SA -->|Events| Auth
-    Auth -->|JWT Token| API
-    API -->|Validate| JWT
-    JWT -->|Validated| Queue
-    Queue -->|Processed| Worker
-    Worker -->|Rate Limited| Rate
-    Rate -->|Transformed| Auth2
-    Auth2 -->|JWT Token| TA
-    Worker -->|Logs| Monitor
+    React -->|HTTP| CloudFront
+    CloudFront -->|Static Files| S3
+    React -->|API Calls| Express
+    Express -->|Auth| JWT
+    Express -->|Rate Limit| Rate
+    Express -->|Logs| Monitor
+    Express -->|Runs On| EC2
+    EC2 -->|Network| VPC
+    VPC -->|Security| SG
+    Monitor -->|Metrics| CW
 ```
 
 ### Key Features
 1. **Reliability**
-   - Bull queue for event persistence
-   - Error handling with retries
-   - Failed job logging
-   - Health check endpoint
+   - Automated deployment with CI/CD
+   - Health check endpoints
+   - Error handling and logging
+   - Infrastructure as Code (Terraform)
 
 2. **Scalability**
-   - Queue-based processing
-   - Rate limiting (5 events/sec)
    - Stateless API design
+   - Auto-scaling capability
+   - Load balancing ready
+   - CDN for frontend
 
 3. **Security**
    - JWT-based authentication
-   - Service-specific tokens
-   - Token validation
-   - Secure headers
+   - VPC network isolation
+   - Security group rules
+   - Encrypted key storage
 
 4. **Monitoring**
-   - Console logging
-   - Event tracking
-   - Error logging
-   - Health monitoring
+   - CloudWatch integration
+   - Health check endpoints
+   - Performance metrics
+   - Error tracking
 
 ## Low-Level Design (LLD)
 
 ### Component Details
 
-#### 1. Bridge Service Architecture
+#### 1. Frontend Architecture
+```mermaid
+graph LR
+    subgraph UI["UI Components"]
+        Dashboard[Dashboard]
+        Events[Event List]
+        Metrics[Metrics]
+        Filters[Filters]
+    end
+    
+    subgraph State["State Management"]
+        Redux[Redux Store]
+        API[API Client]
+        Cache[Local Cache]
+    end
+    
+    subgraph Services["Services"]
+        Auth[Auth Service]
+        Event[Event Service]
+        Metrics[Metrics Service]
+    end
+    
+    UI --> State
+    State --> Services
+    Services --> API
+```
+
+#### 2. Backend Architecture
 ```mermaid
 graph LR
     subgraph API["API Layer"]
-        Express[Express Server]
-        JWT[JWT Auth]
+        Routes[Express Routes]
+        Middleware[Middleware]
+        Controllers[Controllers]
+    end
+    
+    subgraph Services["Service Layer"]
+        Auth[JWT Service]
+        Event[Event Service]
         Rate[Rate Limiter]
     end
     
-    subgraph Processing["Processing Layer"]
-        Bull[Bull Queue]
-        Worker[Event Worker]
-        GraphQL[GraphQL Client]
+    subgraph Infrastructure["Infrastructure Layer"]
+        EC2[EC2 Instance]
+        Nginx[Nginx]
+        PM2[PM2]
     end
     
-    subgraph Auth["Auth Layer"]
-        SourceAuth[Source Auth]
-        TargetAuth[Target Auth]
-    end
-    
-    Express --> JWT
-    JWT --> Rate
-    Rate --> Bull
-    Bull --> Worker
-    Worker --> GraphQL
-    Worker --> TargetAuth
-    SourceAuth --> JWT
+    API --> Services
+    Services --> Infrastructure
 ```
 
 ### Data Flow
-1. **Event Reception**
-   - Source application sends event with JWT token
-   - Express server validates JWT token
-   - Event is validated for required fields
-   - Event is queued in Bull queue
+1. **Frontend Flow**
+   - User interacts with React dashboard
+   - Redux manages application state
+   - API client handles backend communication
+   - Services process business logic
 
-2. **Event Processing**
-   - Bull queue processes events with rate limiting
-   - Worker transforms event (adds brand field)
-   - GraphQL client sends to target API
-   - Response is logged
+2. **Backend Flow**
+   - Express handles HTTP requests
+   - Middleware processes authentication
+   - Controllers manage business logic
+   - Services handle core functionality
 
-3. **Event Delivery**
-   - Transformed event is sent to target GraphQL API
-   - Bridge service authenticates with JWT
-   - Failed events are logged
-   - Success/failure status is tracked
+3. **Infrastructure Flow**
+   - Nginx handles reverse proxy
+   - PM2 manages Node.js processes
+   - CloudWatch collects metrics
+   - S3 serves static files
 
 ### Technical Specifications
 
-#### API Layer
+#### Frontend Layer
+- Framework: React with TypeScript
+- State Management: Redux
+- Styling: CSS Modules
+- Build Tool: Vite
+- Testing: Jest
+
+#### Backend Layer
 - Framework: Express.js with TypeScript
-- Authentication: JWT-based with service-specific tokens
-- Rate Limiting: Bull queue limiter (5 events/sec)
-- Request Timeout: 500ms
-- Health Check: /health endpoint
+- Authentication: JWT
+- Process Manager: PM2
+- Web Server: Nginx
+- Monitoring: CloudWatch
 
-#### Processing Layer
-- Queue System: Bull Queue
-- GraphQL Client: graphql-request
-- Event Transformation: TypeScript utilities
-- Error Handling: Try-catch with logging
-
-#### Authentication Layer
-- JWT Service: Custom implementation
-- Token Types: Service-specific tokens
-- Token Validation: Middleware
-- Token Generation: JWTService class
-
-### Monitoring and Observability
-1. **Logging**
-   - Console logging for events
-   - Error logging for failures
-   - Job status logging
-   - Health check monitoring
-
-2. **Error Tracking**
-   - Failed job logging
-   - Error message capture
-   - Stack trace logging
-   - Job retry tracking
+#### Infrastructure Layer
+- Compute: EC2 t3.micro
+- Storage: S3
+- Network: VPC
+- Security: Security Groups
+- CI/CD: GitHub Actions
 
 ### Deployment Architecture
 ```mermaid
@@ -174,92 +190,118 @@ graph TB
     subgraph AWS["AWS Cloud"]
         subgraph VPC["Virtual Private Cloud"]
             subgraph Public["Public Subnet"]
-                ALB[Application Load Balancer]
-                NAT[NAT Gateway]
+                EC2[EC2 Instance]
+                Nginx[Nginx]
+                PM2[PM2]
             end
             
-            subgraph Private["Private Subnet"]
-                API[Express Servers]
-                Queue[Bull Queue]
-                Redis[(Redis)]
+            subgraph S3["Storage"]
+                Frontend[Frontend Files]
+                Keys[SSH Keys]
             end
         end
         
-        subgraph Monitoring["Monitoring"]
-            CloudWatch[CloudWatch Logs]
+        subgraph CI/CD["CI/CD Pipeline"]
+            GitHub[GitHub Actions]
+            Terraform[Terraform]
+            Build[Build]
+            Deploy[Deploy]
         end
     end
 ```
 
 ### Infrastructure as Code
-- Terraform modules for each component
-- AWS provider configuration
-- Network topology
-- Security groups and IAM roles
+1. **Terraform Modules**
+   - VPC configuration
+   - EC2 instance setup
+   - Security groups
+   - S3 bucket configuration
+   - Key pair management
 
-### CI/CD Pipeline
-1. **Build Stage**
-   - TypeScript compilation
-   - Unit tests
-   - Integration tests
-
-2. **Deploy Stage**
+2. **CI/CD Pipeline**
+   - GitHub Actions workflow
+   - Automated testing
    - Infrastructure deployment
    - Application deployment
    - Health checks
 
-3. **Monitor Stage**
-   - Log monitoring
-   - Error tracking
-   - Health monitoring
+### Security Architecture
+```mermaid
+graph TB
+    subgraph Security["Security Layers"]
+        subgraph Network["Network Security"]
+            VPC[VPC]
+            SG[Security Groups]
+            NACL[Network ACLs]
+        end
+        
+        subgraph Access["Access Control"]
+            IAM[IAM Roles]
+            JWT[JWT Auth]
+            Keys[SSH Keys]
+        end
+        
+        subgraph Data["Data Security"]
+            Encryption[Encryption]
+            SSL[SSL/TLS]
+            Backup[Backups]
+        end
+    end
+```
 
-### Security Considerations
-1. **Authentication**
-   - JWT token validation
-   - Service-specific tokens
-   - Token expiration
-   - Secure token storage
+### Monitoring and Observability
+1. **Logging**
+   - CloudWatch Logs
+   - Application logs
+   - Access logs
+   - Error logs
 
-2. **Application Security**
-   - Input validation
-   - Request sanitization
-   - Error handling
-   - Rate limiting
+2. **Metrics**
+   - CPU utilization
+   - Memory usage
+   - Network traffic
+   - Application performance
 
-3. **Network Security**
-   - VPC isolation
-   - Security groups
-   - HTTPS/TLS
-   - API Gateway
+3. **Alerts**
+   - Health check failures
+   - Error rate thresholds
+   - Resource utilization
+   - Security events
 
 ### Performance Optimization
-1. **Queue Management**
-   - Bull queue configuration
-   - Rate limiting
-   - Job prioritization
-   - Failed job handling
+1. **Frontend**
+   - Code splitting
+   - Lazy loading
+   - Caching
+   - CDN distribution
 
-2. **API Optimization**
-   - Response time optimization
+2. **Backend**
+   - Nginx caching
+   - PM2 clustering
    - Connection pooling
-   - Request batching
-   - Caching strategy
+   - Rate limiting
+
+3. **Infrastructure**
+   - Auto-scaling
+   - Load balancing
+   - Caching layers
+   - CDN integration
 
 ### Maintenance and Support
 1. **Monitoring**
    - Health checks
-   - Log monitoring
-   - Error tracking
    - Performance metrics
+   - Error tracking
+   - Resource utilization
 
-2. **Logging**
-   - Console logging
-   - Error logging
-   - Event tracking
-   - Job status logging
+2. **Backup and Recovery**
+   - Automated backups
+   - Disaster recovery
+   - State management
+   - Key rotation
 
 3. **Documentation**
    - API documentation
-   - System documentation
-   - Runbooks
-   - Troubleshooting guides 
+   - System architecture
+   - Deployment guides
+   - Troubleshooting 
