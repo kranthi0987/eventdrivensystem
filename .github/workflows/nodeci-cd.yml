@@ -137,6 +137,42 @@ jobs:
           #!/bin/bash
           set -e
           
+          # Function to run npm with timeout
+          run_npm_with_timeout() {
+            local command=$1
+            local timeout=300  # 5 minutes timeout
+            local start_time=$(date +%s)
+            
+            echo "Running npm command: $command"
+            timeout $timeout npm $command || {
+              local end_time=$(date +%s)
+              local duration=$((end_time - start_time))
+              echo "npm command timed out after $duration seconds"
+              return 1
+            }
+          }
+          
+          # Function to retry npm command
+          retry_npm() {
+            local command=$1
+            local max_retries=3
+            local retry_count=0
+            
+            while [ $retry_count -lt $max_retries ]; do
+              echo "Attempting npm command (attempt $((retry_count + 1)) of $max_retries)..."
+              if run_npm_with_timeout "$command"; then
+                return 0
+              else
+                echo "npm command failed. Retrying in 30 seconds..."
+                sleep 30
+                retry_count=$((retry_count + 1))
+              fi
+            done
+            
+            echo "npm command failed after $max_retries attempts"
+            return 1
+          }
+          
           # Update system
           sudo yum update -y
           
@@ -163,17 +199,21 @@ jobs:
           git clone $GITHUB_REPOSITORY_URL .
           git checkout $GITHUB_REF_NAME
           
-          # Install dependencies
+          # Clean npm cache
+          echo "Cleaning npm cache..."
+          npm cache clean --force
+          
+          # Install dependencies with retry
           echo "Installing dependencies..."
-          npm ci
+          retry_npm "install --ignore-scripts"
           
-          # Run linting
+          # Run linting with retry
           echo "Running linting..."
-          npm run lint
+          retry_npm "run lint"
           
-          # Build application
+          # Build application with retry
           echo "Building application..."
-          npm run build
+          retry_npm "run build"
           
           # Configure Nginx
           sudo tee /etc/nginx/conf.d/app.conf << 'NGINX_EOF'
