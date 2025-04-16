@@ -95,9 +95,15 @@ jobs:
           # Update system
           sudo yum update -y
           
+          # Install Git
+          sudo yum install -y git
+          
           # Install Node.js and npm
           curl -fsSL https://rpm.nodesource.com/setup_18.x | sudo bash -
           sudo yum install -y nodejs
+          
+          # Update npm to latest version
+          sudo npm install -g npm@latest
           
           # Install PM2
           sudo npm install -g pm2
