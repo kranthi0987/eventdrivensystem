@@ -187,7 +187,7 @@ jobs:
           node --version
           npm --version
           
-          # Install PM2
+          # Install PM2 globally
           sudo npm install -g pm2
           
           # Create app directory
@@ -235,10 +235,16 @@ jobs:
           # Start application with PM2
           pm2 start npm --name "app" -- start
           pm2 save
-          pm2 startup
+          
+          # Setup PM2 startup script
+          echo "Setting up PM2 startup script..."
+          sudo env PATH=$PATH:/usr/bin /usr/lib/node_modules/pm2/bin/pm2 startup systemd -u ec2-user --hp /home/ec2-user
           
           # Restart Nginx
           sudo systemctl restart nginx
+          
+          # Verify PM2 status
+          pm2 list
           EOF
           
           # Make script executable
