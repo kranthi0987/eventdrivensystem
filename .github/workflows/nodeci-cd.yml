@@ -299,17 +299,75 @@ jobs:
           # Save PM2 process list
           pm2 save
           
-          # Setup PM2 startup script
+          # Setup PM2 startup script with retry
           echo "Setting up PM2 startup script..."
-          sudo env PATH=$PATH:/usr/bin /usr/lib/node_modules/pm2/bin/pm2 startup systemd -u ec2-user --hp /home/ec2-user
+          MAX_RETRIES=3
+          RETRY_COUNT=0
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            if sudo env PATH=$PATH:/usr/bin /usr/lib/node_modules/pm2/bin/pm2 startup systemd -u ec2-user --hp /home/ec2-user; then
+              echo "PM2 startup script configured successfully"
+              break
+            else
+              echo "PM2 startup script configuration failed. Retrying in 30 seconds..."
+              sleep 30
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+            fi
+          done
           
-          # Verify PM2 status
+          if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+            echo "Failed to configure PM2 startup script after $MAX_RETRIES attempts"
+            exit 1
+          fi
+          
+          # Verify PM2 status with retry
           echo "Verifying PM2 status..."
+          MAX_RETRIES=3
+          RETRY_COUNT=0
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            if pm2 list; then
+              echo "PM2 status verified successfully"
+              break
+            else
+              echo "PM2 status verification failed. Retrying in 30 seconds..."
+              sleep 30
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+            fi
+          done
+          
+          if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+            echo "Failed to verify PM2 status after $MAX_RETRIES attempts"
+            exit 1
+          fi
+          
+          # Check application logs with retry
+          echo "Checking application logs..."
+          MAX_RETRIES=3
+          RETRY_COUNT=0
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            if pm2 logs --lines 20; then
+              echo "Application logs retrieved successfully"
+              break
+            else
+              echo "Failed to retrieve application logs. Retrying in 30 seconds..."
+              sleep 30
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+            fi
+          done
+          
+          if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+            echo "Failed to retrieve application logs after $MAX_RETRIES attempts"
+            exit 1
+          fi
+          
+          # Final PM2 status check
+          echo "Performing final PM2 status check..."
           pm2 list
           
-          # Check application logs
-          echo "Checking application logs..."
-          pm2 logs --lines 20
+          # Save final PM2 state
+          pm2 save
+          
+          # Ensure PM2 processes will restart on reboot
+          sudo env PATH=$PATH:/usr/bin pm2 startup systemd -u ec2-user --hp /home/ec2-user
           EOF
           
           # Make script executable
