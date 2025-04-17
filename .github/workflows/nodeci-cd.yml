@@ -215,7 +215,11 @@ jobs:
           echo "Building application..."
           retry_npm "run build"
           
-          # Configure Nginx
+          # Install and configure Nginx
+          echo "Installing and configuring Nginx..."
+          sudo yum install -y nginx
+          
+          # Create Nginx configuration
           sudo tee /etc/nginx/conf.d/app.conf << 'NGINX_EOF'
           server {
               listen 80;
@@ -232,7 +236,22 @@ jobs:
           }
           NGINX_EOF
           
+          # Test Nginx configuration
+          sudo nginx -t
+          
+          # Start Nginx
+          sudo systemctl enable nginx
+          sudo systemctl start nginx
+          
+          # Check Nginx status
+          sudo systemctl status nginx
+          
+          # Clean up any existing PM2 startup scripts
+          echo "Cleaning up existing PM2 startup scripts..."
+          pm2 unstartup systemd || true
+          
           # Start application with PM2
+          echo "Starting application with PM2..."
           pm2 start npm --name "app" -- start
           pm2 save
           
@@ -240,11 +259,13 @@ jobs:
           echo "Setting up PM2 startup script..."
           sudo env PATH=$PATH:/usr/bin /usr/lib/node_modules/pm2/bin/pm2 startup systemd -u ec2-user --hp /home/ec2-user
           
-          # Restart Nginx
-          sudo systemctl restart nginx
-          
           # Verify PM2 status
+          echo "Verifying PM2 status..."
           pm2 list
+          
+          # Check application logs
+          echo "Checking application logs..."
+          pm2 logs app --lines 20
           EOF
           
           # Make script executable
