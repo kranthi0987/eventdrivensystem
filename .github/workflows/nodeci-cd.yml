@@ -219,7 +219,98 @@ jobs:
           echo "Installing and configuring Nginx..."
           sudo yum install -y nginx
           
-          # Create Nginx configuration for all services
+          # Clean up any existing PM2 startup scripts
+          echo "Cleaning up existing PM2 startup scripts..."
+          pm2 delete all || true
+          
+          # Function to check if port is in use
+          check_port() {
+            local port=$1
+            if lsof -i :$port > /dev/null 2>&1; then
+              echo "Port $port is in use"
+              return 1
+            else
+              echo "Port $port is available"
+              return 0
+            fi
+          }
+          
+          # Function to find available port
+          find_available_port() {
+            local start_port=$1
+            local port=$start_port
+            while ! check_port $port; do
+              port=$((port + 1))
+              if [ $port -gt $((start_port + 100)) ]; then
+                echo "Could not find available port"
+                return 1
+              fi
+            done
+            echo $port
+            return 0
+          }
+          
+          # Start all services with PM2
+          echo "Starting services with PM2..."
+          
+          # Check and start source app
+          if check_port 3000; then
+            pm2 start npm --name "source-app" -- start -- --port 3000
+          else
+            echo "Port 3000 is in use, finding alternative port..."
+            NEW_PORT=$(find_available_port 3000)
+            pm2 start npm --name "source-app" -- start -- --port $NEW_PORT
+          fi
+          
+          # Check and start bridge service
+          if check_port 3001; then
+            pm2 start npm --name "bridge-service" -- start -- --port 3001
+          else
+            echo "Port 3001 is in use, finding alternative port..."
+            NEW_PORT=$(find_available_port 3001)
+            pm2 start npm --name "bridge-service" -- start -- --port $NEW_PORT
+          fi
+          
+          # Check and start target app
+          if check_port 3002; then
+            pm2 start npm --name "target-app" -- start -- --port 3002
+          else
+            echo "Port 3002 is in use, finding alternative port..."
+            NEW_PORT=$(find_available_port 3002)
+            pm2 start npm --name "target-app" -- start -- --port $NEW_PORT
+          fi
+          
+          # Check and start frontend app with host flag
+          if check_port 5173; then
+            pm2 start npm --name "frontend" -- run dev -- --host --port 5173
+          else
+            echo "Port 5173 is in use, finding alternative port..."
+            NEW_PORT=$(find_available_port 5173)
+            pm2 start npm --name "frontend" -- run dev -- --host --port $NEW_PORT
+          fi
+          
+          # Save PM2 process list
+          pm2 save
+          
+          # Setup PM2 startup script once
+          echo "Setting up PM2 startup script..."
+          sudo env PATH=$PATH:/usr/bin /usr/lib/node_modules/pm2/bin/pm2 startup systemd -u ec2-user --hp /home/ec2-user
+          
+          # Verify PM2 status
+          echo "Verifying PM2 status..."
+          pm2 list
+          
+          # Check application logs
+          echo "Checking application logs..."
+          pm2 logs --lines 20
+          
+          # Update Nginx configuration with actual ports
+          echo "Updating Nginx configuration with actual ports..."
+          SOURCE_PORT=$(pm2 jlist | jq -r '.[] | select(.name=="source-app") | .pm2_env.PORT')
+          BRIDGE_PORT=$(pm2 jlist | jq -r '.[] | select(.name=="bridge-service") | .pm2_env.PORT')
+          TARGET_PORT=$(pm2 jlist | jq -r '.[] | select(.name=="target-app") | .pm2_env.PORT')
+          FRONTEND_PORT=$(pm2 jlist | jq -r '.[] | select(.name=="frontend") | .pm2_env.PORT')
+          
           sudo tee /etc/nginx/conf.d/app.conf << 'NGINX_EOF'
           server {
               listen 80;
@@ -227,7 +318,7 @@ jobs:
           
               # Source app
               location /source {
-                  proxy_pass http://localhost:3000;
+                  proxy_pass http://localhost:${SOURCE_PORT};
                   proxy_http_version 1.1;
                   proxy_set_header Upgrade $http_upgrade;
                   proxy_set_header Connection 'upgrade';
@@ -237,7 +328,7 @@ jobs:
           
               # Bridge service
               location /bridge {
-                  proxy_pass http://localhost:3001;
+                  proxy_pass http://localhost:${BRIDGE_PORT};
                   proxy_http_version 1.1;
                   proxy_set_header Upgrade $http_upgrade;
                   proxy_set_header Connection 'upgrade';
@@ -247,7 +338,7 @@ jobs:
           
               # Target app
               location /target {
-                  proxy_pass http://localhost:3002;
+                  proxy_pass http://localhost:${TARGET_PORT};
                   proxy_http_version 1.1;
                   proxy_set_header Upgrade $http_upgrade;
                   proxy_set_header Connection 'upgrade';
@@ -257,7 +348,7 @@ jobs:
           
               # Frontend app
               location / {
-                  proxy_pass http://localhost:5173;
+                  proxy_pass http://localhost:${FRONTEND_PORT};
                   proxy_http_version 1.1;
                   proxy_set_header Upgrade $http_upgrade;
                   proxy_set_header Connection 'upgrade';
@@ -267,97 +358,17 @@ jobs:
           }
           NGINX_EOF
           
-          # Test Nginx configuration
+          # Test and restart Nginx
           sudo nginx -t
+          sudo systemctl restart nginx
           
-          # Start Nginx
-          sudo systemctl enable nginx
-          sudo systemctl start nginx
-          
-          # Check Nginx status
-          sudo systemctl status nginx
-          
-          # Clean up any existing PM2 startup scripts
-          echo "Cleaning up existing PM2 startup scripts..."
-          pm2 unstartup systemd || true
-          
-          # Start all services with PM2
-          echo "Starting services with PM2..."
-          
-          # Start source app
-          pm2 start npm --name "source-app" -- start -- --port 3000
-          
-          # Start bridge service
-          pm2 start npm --name "bridge-service" -- start -- --port 3001
-          
-          # Start target app
-          pm2 start npm --name "target-app" -- start -- --port 3002
-          
-          # Start frontend app with host flag
-          pm2 start npm --name "frontend" -- run dev -- --host
-          
-          # Save PM2 process list
-          pm2 save
-          
-          # Setup PM2 startup script with retry
-          echo "Setting up PM2 startup script..."
-          MAX_RETRIES=3
-          RETRY_COUNT=0
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            if sudo env PATH=$PATH:/usr/bin /usr/lib/node_modules/pm2/bin/pm2 startup systemd -u ec2-user --hp /home/ec2-user; then
-              echo "PM2 startup script configured successfully"
-              break
-            else
-              echo "PM2 startup script configuration failed. Retrying in 30 seconds..."
-              sleep 30
-              RETRY_COUNT=$((RETRY_COUNT + 1))
-            fi
-          done
-          
-          if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-            echo "Failed to configure PM2 startup script after $MAX_RETRIES attempts"
-            exit 1
-          fi
-          
-          # Verify PM2 status with retry
+          # Verify PM2 status
           echo "Verifying PM2 status..."
-          MAX_RETRIES=3
-          RETRY_COUNT=0
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            if pm2 list; then
-              echo "PM2 status verified successfully"
-              break
-            else
-              echo "PM2 status verification failed. Retrying in 30 seconds..."
-              sleep 30
-              RETRY_COUNT=$((RETRY_COUNT + 1))
-            fi
-          done
+          pm2 list
           
-          if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-            echo "Failed to verify PM2 status after $MAX_RETRIES attempts"
-            exit 1
-          fi
-          
-          # Check application logs with retry
+          # Check application logs
           echo "Checking application logs..."
-          MAX_RETRIES=3
-          RETRY_COUNT=0
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            if pm2 logs --lines 20; then
-              echo "Application logs retrieved successfully"
-              break
-            else
-              echo "Failed to retrieve application logs. Retrying in 30 seconds..."
-              sleep 30
-              RETRY_COUNT=$((RETRY_COUNT + 1))
-            fi
-          done
-          
-          if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-            echo "Failed to retrieve application logs after $MAX_RETRIES attempts"
-            exit 1
-          fi
+          pm2 logs --lines 20
           
           # Final PM2 status check
           echo "Performing final PM2 status check..."
