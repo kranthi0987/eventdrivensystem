@@ -182,13 +182,19 @@ jobs:
           # Install Node.js 20.x and npm
           curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
           sudo yum install -y nodejs
-
+          
           # Install htop
           sudo yum install -y htop
           
           # Install Redis
           echo "Installing Redis..."
+          # Install EPEL repository
+          sudo amazon-linux-extras install epel -y
+          # Install Redis
           sudo yum install -y redis
+          # Configure Redis to listen on all interfaces
+          sudo sed -i 's/bind 127.0.0.1/bind 0.0.0.0/' /etc/redis.conf
+          # Enable and start Redis
           sudo systemctl enable redis
           sudo systemctl start redis
           
