@@ -188,49 +188,21 @@ jobs:
           
           # Install Redis
           echo "Installing Redis..."
-          # Install Redis from Amazon Linux 2 repository
-          sudo yum install -y gcc make
-          wget http://download.redis.io/redis-stable.tar.gz
-          tar xvzf redis-stable.tar.gz
-          cd redis-stable
-          make
-          sudo make install
-          cd ..
+          # Install EPEL and Remi repositories
+          sudo yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+          sudo yum install -y https://rpms.remirepo.net/enterprise/remi-release-7.rpm
           
-          # Create Redis configuration
-          sudo mkdir -p /etc/redis
-          sudo tee /etc/redis/redis.conf << 'REDIS_EOF'
-          bind 0.0.0.0
-          port 6379
-          protected-mode no
-          daemonize yes
-          REDIS_EOF
+          # Enable Remi repository for Redis
+          sudo yum-config-manager --enable remi
           
-          # Create Redis service
-          sudo tee /etc/systemd/system/redis.service << 'SERVICE_EOF'
-          [Unit]
-          Description=Redis In-Memory Data Store
-          After=network.target
+          # Install Redis
+          sudo yum install -y redis
           
-          [Service]
-          User=redis
-          Group=redis
-          ExecStart=/usr/local/bin/redis-server /etc/redis/redis.conf
-          ExecStop=/usr/local/bin/redis-cli shutdown
-          Restart=always
+          # Configure Redis
+          sudo sed -i 's/bind 127.0.0.1/bind 0.0.0.0/' /etc/redis.conf
+          sudo sed -i 's/protected-mode yes/protected-mode no/' /etc/redis.conf
           
-          [Install]
-          WantedBy=multi-user.target
-          SERVICE_EOF
-          
-          # Create Redis user and set permissions
-          sudo useradd -r redis
-          sudo mkdir -p /var/lib/redis
-          sudo chown redis:redis /var/lib/redis
-          sudo chmod 770 /var/lib/redis
-          
-          # Enable and start Redis
-          sudo systemctl daemon-reload
+          # Start and enable Redis
           sudo systemctl enable redis
           sudo systemctl start redis
           
