@@ -186,29 +186,6 @@ jobs:
           # Install htop
           sudo yum install -y htop
           
-          # Install Redis
-          echo "Installing Redis..."
-          # Install EPEL and Remi repositories
-          sudo yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
-          sudo yum install -y https://rpms.remirepo.net/enterprise/remi-release-7.rpm
-          
-          # Enable Remi repository for Redis
-          sudo yum-config-manager --enable remi
-          
-          # Install Redis
-          sudo yum install -y redis
-          
-          # Configure Redis
-          sudo sed -i 's/bind 127.0.0.1/bind 0.0.0.0/' /etc/redis.conf
-          sudo sed -i 's/protected-mode yes/protected-mode no/' /etc/redis.conf
-          
-          # Start and enable Redis
-          sudo systemctl enable redis
-          sudo systemctl start redis
-          
-          # Verify Redis is running
-          redis-cli ping
-          
           # Install PM2 globally
           sudo npm install -g pm2
           
