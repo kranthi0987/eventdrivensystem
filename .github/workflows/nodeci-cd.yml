@@ -250,125 +250,194 @@ jobs:
             return 0
           }
           
-          # Start all services with PM2
-          echo "Starting services with PM2..."
+          # Install dependencies and build applications
+          echo "Installing dependencies and building applications..."
           
-          # Check and start source app
+          # Source app
+          cd /var/www/app/apps/source-app
+          npm install
+          npm run build
+          
+          # Bridge service
+          cd /var/www/app/apps/bridge-service
+          npm install
+          npm run build
+          
+          # Target app
+          cd /var/www/app/apps/target-app
+          npm install
+          npm run build
+          
+          # Frontend app
+          cd /var/www/app/apps/event-monitor
+          npm install
+          npm run build
+          
+          # Start applications with PM2
+          echo "Starting applications with PM2..."
+          
+          # Source app
           if check_port 3000; then
-            pm2 start npm --name "source-app" -- start -- --port 3000
+            PORT=3000
           else
             echo "Port 3000 is in use, finding alternative port..."
-            NEW_PORT=$(find_available_port 3000)
-            pm2 start npm --name "source-app" -- start -- --port $NEW_PORT
+            PORT=$(find_available_port 3000)
           fi
+          cd /var/www/app/apps/source-app
+          pm2 start dist/main.js --name "source-app" -- --port $PORT --host 127.0.0.1
+          pm2 env source-app PORT=$PORT
           
-          # Check and start bridge service
+          # Bridge service
           if check_port 3001; then
-            pm2 start npm --name "bridge-service" -- start -- --port 3001
+            PORT=3001
           else
             echo "Port 3001 is in use, finding alternative port..."
-            NEW_PORT=$(find_available_port 3001)
-            pm2 start npm --name "bridge-service" -- start -- --port $NEW_PORT
+            PORT=$(find_available_port 3001)
           fi
+          cd /var/www/app/apps/bridge-service
+          pm2 start dist/main.js --name "bridge-service" -- --port $PORT --host 127.0.0.1
+          pm2 env bridge-service PORT=$PORT
           
-          # Check and start target app
+          # Target app
           if check_port 3002; then
-            pm2 start npm --name "target-app" -- start -- --port 3002
+            PORT=3002
           else
             echo "Port 3002 is in use, finding alternative port..."
-            NEW_PORT=$(find_available_port 3002)
-            pm2 start npm --name "target-app" -- start -- --port $NEW_PORT
+            PORT=$(find_available_port 3002)
           fi
+          cd /var/www/app/apps/target-app
+          pm2 start dist/main.js --name "target-app" -- --port $PORT --host 127.0.0.1
+          pm2 env target-app PORT=$PORT
           
-          # Check and start frontend app with host flag
+          # Frontend app
           if check_port 5173; then
-            pm2 start npm --name "frontend" -- run dev -- --host --port 5173
+            PORT=5173
           else
             echo "Port 5173 is in use, finding alternative port..."
-            NEW_PORT=$(find_available_port 5173)
-            pm2 start npm --name "frontend" -- run dev -- --host --port $NEW_PORT
+            PORT=$(find_available_port 5173)
           fi
+          cd /var/www/app/apps/event-monitor
+          pm2 start npm --name "frontend" -- run dev -- --host 127.0.0.1 --port $PORT
+          pm2 env frontend PORT=$PORT
           
           # Save PM2 process list
           pm2 save
           
-          # Setup PM2 startup script once
-          echo "Setting up PM2 startup script..."
-          sudo env PATH=$PATH:/usr/bin /usr/lib/node_modules/pm2/bin/pm2 startup systemd -u ec2-user --hp /home/ec2-user
-          
-          # Verify PM2 status
-          echo "Verifying PM2 status..."
-          pm2 list
-          
-          # Check application logs
-          echo "Checking application logs..."
-          pm2 logs --lines 20
-          
-          # Update Nginx configuration with actual ports
-          echo "Updating Nginx configuration with actual ports..."
+          # Get actual ports from PM2
           SOURCE_PORT=$(pm2 jlist | jq -r '.[] | select(.name=="source-app") | .pm2_env.PORT')
           BRIDGE_PORT=$(pm2 jlist | jq -r '.[] | select(.name=="bridge-service") | .pm2_env.PORT')
           TARGET_PORT=$(pm2 jlist | jq -r '.[] | select(.name=="target-app") | .pm2_env.PORT')
           FRONTEND_PORT=$(pm2 jlist | jq -r '.[] | select(.name=="frontend") | .pm2_env.PORT')
           
-          sudo tee /etc/nginx/conf.d/app.conf << 'NGINX_EOF'
-          server {
-              listen 80;
-              server_name _;
+          # Verify ports are set
+          echo "Source Port: $SOURCE_PORT"
+          echo "Bridge Port: $BRIDGE_PORT"
+          echo "Target Port: $TARGET_PORT"
+          echo "Frontend Port: $FRONTEND_PORT"
           
-              # Source app
-              location /source {
-                  proxy_pass http://localhost:${SOURCE_PORT};
-                  proxy_http_version 1.1;
-                  proxy_set_header Upgrade $http_upgrade;
-                  proxy_set_header Connection 'upgrade';
-                  proxy_set_header Host $host;
-                  proxy_cache_bypass $http_upgrade;
-              }
+          # Create Nginx configuration with actual port values
+          cat > /tmp/nginx_app.conf << EOL
+server {
+    listen 80;
+    server_name _;
+    
+    # Add security headers
+    add_header X-Frame-Options "SAMEORIGIN";
+    add_header X-XSS-Protection "1; mode=block";
+    add_header X-Content-Type-Options "nosniff";
+    
+    # Increase timeouts
+    proxy_connect_timeout 600s;
+    proxy_send_timeout 600s;
+    proxy_read_timeout 600s;
+    send_timeout 600s;
+
+    # Source app
+    location /source {
+        proxy_pass http://127.0.0.1:${SOURCE_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    # Bridge service
+    location /bridge {
+        proxy_pass http://127.0.0.1:${BRIDGE_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    # Target app
+    location /target {
+        proxy_pass http://127.0.0.1:${TARGET_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    # Frontend app
+    location / {
+        proxy_pass http://127.0.0.1:${FRONTEND_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+EOL
+
+          # Verify the generated configuration
+          echo "Generated Nginx configuration:"
+          cat /tmp/nginx_app.conf
           
-              # Bridge service
-              location /bridge {
-                  proxy_pass http://localhost:${BRIDGE_PORT};
-                  proxy_http_version 1.1;
-                  proxy_set_header Upgrade $http_upgrade;
-                  proxy_set_header Connection 'upgrade';
-                  proxy_set_header Host $host;
-                  proxy_cache_bypass $http_upgrade;
-              }
+          # Move the configuration file to the correct location
+          sudo mv /tmp/nginx_app.conf /etc/nginx/conf.d/app.conf
           
-              # Target app
-              location /target {
-                  proxy_pass http://localhost:${TARGET_PORT};
-                  proxy_http_version 1.1;
-                  proxy_set_header Upgrade $http_upgrade;
-                  proxy_set_header Connection 'upgrade';
-                  proxy_set_header Host $host;
-                  proxy_cache_bypass $http_upgrade;
-              }
+          # Set proper permissions
+          sudo chown root:root /etc/nginx/conf.d/app.conf
+          sudo chmod 644 /etc/nginx/conf.d/app.conf
           
-              # Frontend app
-              location / {
-                  proxy_pass http://localhost:${FRONTEND_PORT};
-                  proxy_http_version 1.1;
-                  proxy_set_header Upgrade $http_upgrade;
-                  proxy_set_header Connection 'upgrade';
-                  proxy_set_header Host $host;
-                  proxy_cache_bypass $http_upgrade;
-              }
-          }
-          NGINX_EOF
-          
-          # Test and restart Nginx
+          # Test Nginx configuration
+          echo "Testing Nginx configuration..."
           sudo nginx -t
+          
+          # Restart Nginx
+          echo "Restarting Nginx..."
           sudo systemctl restart nginx
           
-          # Verify PM2 status
-          echo "Verifying PM2 status..."
+          # Verify Nginx status
+          echo "Checking Nginx status..."
+          sudo systemctl status nginx
+          
+          # Verify PM2 processes are running
+          echo "Checking PM2 processes..."
           pm2 list
           
-          # Check application logs
-          echo "Checking application logs..."
-          pm2 logs --lines 20
+          # Save PM2 process list
+          pm2 save
+          
+          # Setup PM2 startup script
+          sudo env PATH=$PATH:/usr/bin /usr/lib/node_modules/pm2/bin/pm2 startup systemd -u ec2-user --hp /home/ec2-user
           
           # Final PM2 status check
           echo "Performing final PM2 status check..."
