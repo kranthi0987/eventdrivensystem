@@ -270,8 +270,8 @@ jobs:
           fi
           cd /var/www/app/apps/source-app
           pm2 start dist/app.js --name "source-app" -- --port $PORT --host 127.0.0.1
-          sleep 2  # Give PM2 time to register the process
-          pm2 env source-app PORT=$PORT
+          # sleep 2  # Give PM2 time to register the process
+          # pm2 env source-app PORT=$PORT
           
           # Bridge service
           if check_port 3001; then
@@ -282,8 +282,8 @@ jobs:
           fi
           cd /var/www/app/apps/bridge-service
           pm2 start dist/app.js --name "bridge-service" -- --port $PORT --host 127.0.0.1
-          sleep 2  # Give PM2 time to register the process
-          pm2 env bridge-service PORT=$PORT
+          # sleep 2  # Give PM2 time to register the process
+          # pm2 env bridge-service PORT=$PORT
           
           # Target app
           if check_port 3002; then
@@ -294,8 +294,8 @@ jobs:
           fi
           cd /var/www/app/apps/target-app
           pm2 start dist/app.js --name "target-app" -- --port $PORT --host 127.0.0.1
-          sleep 2  # Give PM2 time to register the process
-          pm2 env target-app PORT=$PORT
+          # sleep 2  # Give PM2 time to register the process
+          # pm2 env target-app PORT=$PORT
           
           # Frontend app
           if check_port 5173; then
@@ -306,8 +306,8 @@ jobs:
           fi
           cd /var/www/app/apps/event-monitor
           pm2 start npm --name "frontend" -- run dev -- --host 127.0.0.1 --port $PORT
-          sleep 2  # Give PM2 time to register the process
-          pm2 env frontend PORT=$PORT
+          # sleep 2  # Give PM2 time to register the process
+          # pm2 env frontend PORT=$PORT
           
           # Save PM2 process list
           pm2 save
