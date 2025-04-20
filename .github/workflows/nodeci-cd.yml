@@ -270,6 +270,7 @@ jobs:
           fi
           cd /var/www/app/apps/source-app
           pm2 start dist/app.js --name "source-app" -- --port $PORT --host 127.0.0.1
+          sleep 2  # Give PM2 time to register the process
           pm2 env source-app PORT=$PORT
           
           # Bridge service
@@ -281,6 +282,7 @@ jobs:
           fi
           cd /var/www/app/apps/bridge-service
           pm2 start dist/app.js --name "bridge-service" -- --port $PORT --host 127.0.0.1
+          sleep 2  # Give PM2 time to register the process
           pm2 env bridge-service PORT=$PORT
           
           # Target app
@@ -292,6 +294,7 @@ jobs:
           fi
           cd /var/www/app/apps/target-app
           pm2 start dist/app.js --name "target-app" -- --port $PORT --host 127.0.0.1
+          sleep 2  # Give PM2 time to register the process
           pm2 env target-app PORT=$PORT
           
           # Frontend app
@@ -303,6 +306,7 @@ jobs:
           fi
           cd /var/www/app/apps/event-monitor
           pm2 start npm --name "frontend" -- run dev -- --host 127.0.0.1 --port $PORT
+          sleep 2  # Give PM2 time to register the process
           pm2 env frontend PORT=$PORT
           
           # Save PM2 process list
@@ -341,52 +345,52 @@ jobs:
               location /source {
                   proxy_pass http://127.0.0.1:${SOURCE_PORT};
                   proxy_http_version 1.1;
-                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Upgrade \$http_upgrade;
                   proxy_set_header Connection 'upgrade';
-                  proxy_set_header Host $host;
-                  proxy_set_header X-Real-IP $remote_addr;
-                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                  proxy_set_header X-Forwarded-Proto $scheme;
-                  proxy_cache_bypass $http_upgrade;
+                  proxy_set_header Host \$host;
+                  proxy_set_header X-Real-IP \$remote_addr;
+                  proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto \$scheme;
+                  proxy_cache_bypass \$http_upgrade;
               }
 
               # Bridge service
               location /bridge {
                   proxy_pass http://127.0.0.1:${BRIDGE_PORT};
                   proxy_http_version 1.1;
-                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Upgrade \$http_upgrade;
                   proxy_set_header Connection 'upgrade';
-                  proxy_set_header Host $host;
-                  proxy_set_header X-Real-IP $remote_addr;
-                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                  proxy_set_header X-Forwarded-Proto $scheme;
-                  proxy_cache_bypass $http_upgrade;
+                  proxy_set_header Host \$host;
+                  proxy_set_header X-Real-IP \$remote_addr;
+                  proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto \$scheme;
+                  proxy_cache_bypass \$http_upgrade;
               }
 
               # Target app
               location /target {
                   proxy_pass http://127.0.0.1:${TARGET_PORT};
                   proxy_http_version 1.1;
-                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Upgrade \$http_upgrade;
                   proxy_set_header Connection 'upgrade';
-                  proxy_set_header Host $host;
-                  proxy_set_header X-Real-IP $remote_addr;
-                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                  proxy_set_header X-Forwarded-Proto $scheme;
-                  proxy_cache_bypass $http_upgrade;
+                  proxy_set_header Host \$host;
+                  proxy_set_header X-Real-IP \$remote_addr;
+                  proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto \$scheme;
+                  proxy_cache_bypass \$http_upgrade;
               }
 
               # Frontend app
               location / {
                   proxy_pass http://127.0.0.1:${FRONTEND_PORT};
                   proxy_http_version 1.1;
-                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Upgrade \$http_upgrade;
                   proxy_set_header Connection 'upgrade';
-                  proxy_set_header Host $host;
-                  proxy_set_header X-Real-IP $remote_addr;
-                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                  proxy_set_header X-Forwarded-Proto $scheme;
-                  proxy_cache_bypass $http_upgrade;
+                  proxy_set_header Host \$host;
+                  proxy_set_header X-Real-IP \$remote_addr;
+                  proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto \$scheme;
+                  proxy_cache_bypass \$http_upgrade;
               }
           }
           EOL
@@ -394,6 +398,9 @@ jobs:
           # Verify the generated configuration
           echo "Generated Nginx configuration:"
           cat /tmp/nginx_app.conf
+          
+          # Remove default Nginx configuration
+          sudo rm -f /etc/nginx/conf.d/default.conf
           
           # Move the configuration file to the correct location
           sudo mv /tmp/nginx_app.conf /etc/nginx/conf.d/app.conf
@@ -406,17 +413,41 @@ jobs:
           echo "Testing Nginx configuration..."
           sudo nginx -t
           
-          # Restart Nginx
-          echo "Restarting Nginx..."
-          sudo systemctl restart nginx
+          # Stop Nginx if it's running
+          sudo systemctl stop nginx || true
+          
+          # Start Nginx
+          echo "Starting Nginx..."
+          sudo systemctl start nginx
+          
+          # Enable Nginx to start on boot
+          sudo systemctl enable nginx
           
           # Verify Nginx status
           echo "Checking Nginx status..."
           sudo systemctl status nginx
           
-          # Verify PM2 processes are running
-          echo "Checking PM2 processes..."
-          pm2 list
+          # Check Nginx logs for any errors
+          echo "Checking Nginx error logs..."
+          sudo tail -n 50 /var/log/nginx/error.log
+          
+          # Check Nginx access logs
+          echo "Checking Nginx access logs..."
+          sudo tail -n 50 /var/log/nginx/access.log
+          
+          # Verify Nginx is listening on port 80
+          echo "Checking if Nginx is listening on port 80..."
+          sudo netstat -tulpn | grep nginx
+          
+          # Check SELinux status and set proper context if needed
+          echo "Checking SELinux status..."
+          if command -v sestatus >/dev/null 2>&1; then
+            if sestatus | grep "SELinux status" | grep -q "enabled"; then
+              echo "SELinux is enabled, setting proper context for Nginx..."
+              sudo chcon -Rt httpd_sys_content_t /var/www/app
+              sudo setsebool -P httpd_can_network_connect 1
+            fi
+          fi
           
           # Save PM2 process list
           pm2 save
