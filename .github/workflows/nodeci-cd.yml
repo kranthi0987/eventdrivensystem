@@ -269,7 +269,7 @@ jobs:
             PORT=$(find_available_port 3000)
           fi
           cd /var/www/app/apps/source-app
-          pm2 start dist/main.js --name "source-app" -- --port $PORT --host 127.0.0.1
+          pm2 start dist/app.js --name "source-app" -- --port $PORT --host 127.0.0.1
           pm2 env source-app PORT=$PORT
           
           # Bridge service
@@ -280,7 +280,7 @@ jobs:
             PORT=$(find_available_port 3001)
           fi
           cd /var/www/app/apps/bridge-service
-          pm2 start dist/main.js --name "bridge-service" -- --port $PORT --host 127.0.0.1
+          pm2 start dist/app.js --name "bridge-service" -- --port $PORT --host 127.0.0.1
           pm2 env bridge-service PORT=$PORT
           
           # Target app
@@ -291,7 +291,7 @@ jobs:
             PORT=$(find_available_port 3002)
           fi
           cd /var/www/app/apps/target-app
-          pm2 start dist/main.js --name "target-app" -- --port $PORT --host 127.0.0.1
+          pm2 start dist/app.js --name "target-app" -- --port $PORT --host 127.0.0.1
           pm2 env target-app PORT=$PORT
           
           # Frontend app
