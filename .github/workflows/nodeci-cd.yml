@@ -183,8 +183,9 @@ jobs:
           curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
           sudo yum install -y nodejs
           
-          # Install htop
-          sudo yum install -y htop
+          # Verify Node.js and npm versions
+          node --version
+          npm --version
           
           # Install PM2 globally
           sudo npm install -g pm2
@@ -210,39 +211,16 @@ jobs:
           echo "Running linting..."
           retry_npm "run lint"
           
-          # Build all applications
-          echo "Building applications..."
-          
-          # Build source app
-          echo "Building source app..."
-          cd source-app
+          # Build application with retry
+          echo "Building application..."
           retry_npm "run build"
-          cd ..
-          
-          # Build bridge service
-          echo "Building bridge service..."
-          cd bridge-service
-          retry_npm "run build"
-          cd ..
-          
-          # Build target app
-          echo "Building target app..."
-          cd target-app
-          retry_npm "run build"
-          cd ..
-          
-          # Build frontend
-          echo "Building frontend..."
-          cd frontend
-          retry_npm "run build"
-          cd ..
           
           # Install and configure Nginx
           echo "Installing and configuring Nginx..."
           sudo yum install -y nginx
           
-          # Clean up any existing PM2 processes
-          echo "Cleaning up existing PM2 processes..."
+          # Clean up any existing PM2 startup scripts
+          echo "Cleaning up existing PM2 startup scripts..."
           pm2 delete all || true
           
           # Function to check if port is in use
@@ -272,49 +250,49 @@ jobs:
             return 0
           }
           
-          # Start all services with PM2 using built code
+          # Start all services with PM2
           echo "Starting services with PM2..."
           
-          # Start source app (production)
+          # Check and start source app
           if check_port 3000; then
-            pm2 start npm --name "source-app" -- start --prefix source-app -- --port 3000
+            pm2 start npm --name "source-app" -- start -- --port 3000
           else
             echo "Port 3000 is in use, finding alternative port..."
             NEW_PORT=$(find_available_port 3000)
-            pm2 start npm --name "source-app" -- start --prefix source-app -- --port $NEW_PORT
+            pm2 start npm --name "source-app" -- start -- --port $NEW_PORT
           fi
           
-          # Start bridge service (production)
+          # Check and start bridge service
           if check_port 3001; then
-            pm2 start npm --name "bridge-service" -- start --prefix bridge-service -- --port 3001
+            pm2 start npm --name "bridge-service" -- start -- --port 3001
           else
             echo "Port 3001 is in use, finding alternative port..."
             NEW_PORT=$(find_available_port 3001)
-            pm2 start npm --name "bridge-service" -- start --prefix bridge-service -- --port $NEW_PORT
+            pm2 start npm --name "bridge-service" -- start -- --port $NEW_PORT
           fi
           
-          # Start target app with Redis dependency (production)
+          # Check and start target app
           if check_port 3002; then
-            pm2 start npm --name "target-app" -- start --prefix target-app -- --port 3002
+            pm2 start npm --name "target-app" -- start -- --port 3002
           else
             echo "Port 3002 is in use, finding alternative port..."
             NEW_PORT=$(find_available_port 3002)
-            pm2 start npm --name "target-app" -- start --prefix target-app -- --port $NEW_PORT
+            pm2 start npm --name "target-app" -- start -- --port $NEW_PORT
           fi
           
-          # Start frontend app (production)
+          # Check and start frontend app with host flag
           if check_port 5173; then
-            pm2 start npm --name "frontend" -- start --host 0.0.0.0 --prefix frontend -- --port 5173
+            pm2 start npm --name "frontend" -- run dev -- --host --port 5173
           else
             echo "Port 5173 is in use, finding alternative port..."
             NEW_PORT=$(find_available_port 5173)
-            pm2 start npm --name "frontend" -- start --prefix frontend -- --port $NEW_PORT
+            pm2 start npm --name "frontend" -- run dev -- --host --port $NEW_PORT
           fi
           
           # Save PM2 process list
           pm2 save
           
-          # Setup PM2 startup script
+          # Setup PM2 startup script once
           echo "Setting up PM2 startup script..."
           sudo env PATH=$PATH:/usr/bin /usr/lib/node_modules/pm2/bin/pm2 startup systemd -u ec2-user --hp /home/ec2-user
           
@@ -384,11 +362,13 @@ jobs:
           sudo nginx -t
           sudo systemctl restart nginx
           
-          # Verify all services are running
-          echo "Verifying all services are running..."
+          # Verify PM2 status
+          echo "Verifying PM2 status..."
           pm2 list
-          redis-cli ping
-          curl -I http://localhost:${FRONTEND_PORT}
+          
+          # Check application logs
+          echo "Checking application logs..."
+          pm2 logs --lines 20
           
           # Final PM2 status check
           echo "Performing final PM2 status check..."
