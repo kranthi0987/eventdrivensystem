@@ -250,21 +250,6 @@ jobs:
             return 0
           }
           
-          # Install dependencies and build applications
-          echo "Installing dependencies and building applications..."
-          
-          # Install dependencies for each application
-          cd /var/www/app/apps/source-app && npm install && cd ../..
-          cd /var/www/app/apps/bridge-service && npm install && cd ../..
-          cd /var/www/app/apps/target-app && npm install && cd ../..
-          cd /var/www/app/apps/event-monitor && npm install && cd ../..
-          
-          # Build applications
-          echo "Building applications..."
-          cd /var/www/app/apps/source-app && npm run build && cd ../..
-          cd /var/www/app/apps/bridge-service && npm run build && cd ../..
-          cd /var/www/app/apps/target-app && npm run build && cd ../..
-          cd /var/www/app/apps/event-monitor && npm run build && cd ../..
           
           # Verify builds
           echo "Verifying builds..."
