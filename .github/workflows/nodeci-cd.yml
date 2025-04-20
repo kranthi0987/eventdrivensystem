@@ -253,16 +253,16 @@ jobs:
           # Install dependencies and build applications
           echo "Installing dependencies and building applications..."
           
-          # Install root dependencies
-          cd /var/www/app
-          npm install
+          # # Install root dependencies
+          # cd /var/www/app
+          # npm install
           
-          # Build all applications in parallel
-          echo "Building applications..."
-          cd apps/source-app && npm run build && cd ../..
-          cd apps/bridge-service && npm run build && cd ../..
-          cd apps/target-app && npm run build && cd ../..
-          cd apps/event-monitor && npm run build && cd ../..
+          # # Build all applications in parallel
+          # echo "Building applications..."
+          # cd apps/source-app && npm run build && cd ../..
+          # cd apps/bridge-service && npm run build && cd ../..
+          # cd apps/target-app && npm run build && cd ../..
+          # cd apps/event-monitor && npm run build && cd ../..
           
           # Start applications with PM2
           echo "Starting applications with PM2..."
