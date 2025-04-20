@@ -263,60 +263,46 @@ jobs:
           
           # Source app
           if check_port 3000; then
-            PORT=3000
+            SOURCE_PORT=3000
           else
             echo "Port 3000 is in use, finding alternative port..."
-            PORT=$(find_available_port 3000)
+            SOURCE_PORT=$(find_available_port 3000)
           fi
           cd /var/www/app/apps/source-app
-          pm2 start dist/app.js --name "source-app" -- --port $PORT --host 127.0.0.1
-          # sleep 2  # Give PM2 time to register the process
-          # pm2 env source-app PORT=$PORT
+          pm2 start dist/app.js --name "source-app" -- --port $SOURCE_PORT --host 127.0.0.1
           
           # Bridge service
           if check_port 3001; then
-            PORT=3001
+            BRIDGE_PORT=3001
           else
             echo "Port 3001 is in use, finding alternative port..."
-            PORT=$(find_available_port 3001)
+            BRIDGE_PORT=$(find_available_port 3001)
           fi
           cd /var/www/app/apps/bridge-service
-          pm2 start dist/app.js --name "bridge-service" -- --port $PORT --host 127.0.0.1
-          # sleep 2  # Give PM2 time to register the process
-          # pm2 env bridge-service PORT=$PORT
+          pm2 start dist/app.js --name "bridge-service" -- --port $BRIDGE_PORT --host 127.0.0.1
           
           # Target app
           if check_port 3002; then
-            PORT=3002
+            TARGET_PORT=3002
           else
             echo "Port 3002 is in use, finding alternative port..."
-            PORT=$(find_available_port 3002)
+            TARGET_PORT=$(find_available_port 3002)
           fi
           cd /var/www/app/apps/target-app
-          pm2 start dist/app.js --name "target-app" -- --port $PORT --host 127.0.0.1
-          # sleep 2  # Give PM2 time to register the process
-          # pm2 env target-app PORT=$PORT
+          pm2 start dist/app.js --name "target-app" -- --port $TARGET_PORT --host 127.0.0.1
           
           # Frontend app
           if check_port 5173; then
-            PORT=5173
+            FRONTEND_PORT=5173
           else
             echo "Port 5173 is in use, finding alternative port..."
-            PORT=$(find_available_port 5173)
+            FRONTEND_PORT=$(find_available_port 5173)
           fi
           cd /var/www/app/apps/event-monitor
-          pm2 start npm --name "frontend" -- run dev -- --host 127.0.0.1 --port $PORT
-          # sleep 2  # Give PM2 time to register the process
-          # pm2 env frontend PORT=$PORT
+          pm2 start npm --name "frontend" -- run dev -- --host 127.0.0.1 --port $FRONTEND_PORT
           
           # Save PM2 process list
           pm2 save
-          
-          # Get actual ports from PM2
-          SOURCE_PORT=$(pm2 jlist | jq -r '.[] | select(.name=="source-app") | .pm2_env.PORT')
-          BRIDGE_PORT=$(pm2 jlist | jq -r '.[] | select(.name=="bridge-service") | .pm2_env.PORT')
-          TARGET_PORT=$(pm2 jlist | jq -r '.[] | select(.name=="target-app") | .pm2_env.PORT')
-          FRONTEND_PORT=$(pm2 jlist | jq -r '.[] | select(.name=="frontend") | .pm2_env.PORT')
           
           # Verify ports are set
           echo "Source Port: $SOURCE_PORT"
