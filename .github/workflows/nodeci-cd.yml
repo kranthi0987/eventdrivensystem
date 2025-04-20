@@ -253,25 +253,16 @@ jobs:
           # Install dependencies and build applications
           echo "Installing dependencies and building applications..."
           
-          # Source app
-          cd /var/www/app/apps/source-app
+          # Install root dependencies
+          cd /var/www/app
           npm install
-          npm run build
           
-          # Bridge service
-          cd /var/www/app/apps/bridge-service
-          npm install
-          npm run build
-          
-          # Target app
-          cd /var/www/app/apps/target-app
-          npm install
-          npm run build
-          
-          # Frontend app
-          cd /var/www/app/apps/event-monitor
-          npm install
-          npm run build
+          # Build all applications in parallel
+          echo "Building applications..."
+          cd apps/source-app && npm run build && cd ../..
+          cd apps/bridge-service && npm run build && cd ../..
+          cd apps/target-app && npm run build && cd ../..
+          cd apps/event-monitor && npm run build && cd ../..
           
           # Start applications with PM2
           echo "Starting applications with PM2..."
@@ -283,8 +274,7 @@ jobs:
             echo "Port 3000 is in use, finding alternative port..."
             PORT=$(find_available_port 3000)
           fi
-          cd /var/www/app/apps/source-app
-          pm2 start dist/main.js --name "source-app" -- --port $PORT --host 127.0.0.1
+          pm2 start apps/source-app/dist/main.js --name "source-app" -- --port $PORT --host 127.0.0.1
           pm2 env source-app PORT=$PORT
           
           # Bridge service
@@ -294,8 +284,7 @@ jobs:
             echo "Port 3001 is in use, finding alternative port..."
             PORT=$(find_available_port 3001)
           fi
-          cd /var/www/app/apps/bridge-service
-          pm2 start dist/main.js --name "bridge-service" -- --port $PORT --host 127.0.0.1
+          pm2 start apps/bridge-service/dist/main.js --name "bridge-service" -- --port $PORT --host 127.0.0.1
           pm2 env bridge-service PORT=$PORT
           
           # Target app
@@ -305,8 +294,7 @@ jobs:
             echo "Port 3002 is in use, finding alternative port..."
             PORT=$(find_available_port 3002)
           fi
-          cd /var/www/app/apps/target-app
-          pm2 start dist/main.js --name "target-app" -- --port $PORT --host 127.0.0.1
+          pm2 start apps/target-app/dist/main.js --name "target-app" -- --port $PORT --host 127.0.0.1
           pm2 env target-app PORT=$PORT
           
           # Frontend app
@@ -316,8 +304,7 @@ jobs:
             echo "Port 5173 is in use, finding alternative port..."
             PORT=$(find_available_port 5173)
           fi
-          cd /var/www/app/apps/event-monitor
-          pm2 start npm --name "frontend" -- run dev -- --host 127.0.0.1 --port $PORT
+          pm2 start npm --name "frontend" --cwd apps/event-monitor -- run dev -- --host 127.0.0.1 --port $PORT
           pm2 env frontend PORT=$PORT
           
           # Save PM2 process list
