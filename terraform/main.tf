@@ -162,6 +162,15 @@ resource "aws_security_group" "app" {
     description = "HTTP"
   }
 
+  # Allow HTTPS traffic
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "HTTPS"
+  }
+
   # Allow SSH traffic
   ingress {
     from_port   = 22
@@ -171,13 +180,22 @@ resource "aws_security_group" "app" {
     description = "SSH"
   }
 
-  # Allow application port
+  # Allow application ports
   ingress {
-    from_port   = var.app_port
-    to_port     = var.app_port
+    from_port   = 3000
+    to_port     = 3002
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
-    description = "Application port"
+    description = "Application ports"
+  }
+
+  # Allow frontend port
+  ingress {
+    from_port   = 5173
+    to_port     = 5173
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "Frontend port"
   }
 
   # Allow all outbound traffic
@@ -192,6 +210,20 @@ resource "aws_security_group" "app" {
   tags = merge(var.tags, {
     Name = "${var.project_name}-app-sg"
   })
+}
+
+# Elastic IP for the EC2 instance
+resource "aws_eip" "app" {
+  domain = "vpc"
+  tags = merge(var.tags, {
+    Name = "${var.project_name}-eip"
+  })
+}
+
+# Associate Elastic IP with EC2 instance
+resource "aws_eip_association" "app" {
+  instance_id   = aws_instance.app.id
+  allocation_id = aws_eip.app.id
 }
 
 # EC2 Instance
@@ -241,11 +273,15 @@ data "aws_ami" "amazon_linux_2023" {
 
 # Outputs
 output "instance_public_ip" {
-  value = aws_instance.app.public_ip
+  value = aws_eip.app.public_ip
 }
 
 output "instance_public_dns" {
-  value = aws_instance.app.public_dns
+  value = aws_eip.app.public_dns
+}
+
+output "elastic_ip" {
+  value = aws_eip.app.public_ip
 }
 
 output "key_bucket_name" {
