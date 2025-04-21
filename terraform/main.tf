@@ -214,7 +214,6 @@ resource "aws_security_group" "app" {
 
 # Elastic IP for the EC2 instance
 resource "aws_eip" "app" {
-  domain = "vpc"
   tags = merge(var.tags, {
     Name = "${var.project_name}-eip"
   })
