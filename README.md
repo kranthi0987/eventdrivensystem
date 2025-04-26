@@ -120,3 +120,81 @@ The system is automatically deployed when changes are pushed to the main branch.
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
+
+# Environment Setup
+
+## Prerequisites
+- Node.js (v20 or later)
+- npm (v9 or later)
+- PowerShell (for Windows users)
+
+## Setting Up Environment Variables
+
+1. Clone the repository:
+```bash
+git clone <repository-url>
+cd eventdrivensystem
+```
+
+2. Set up environment variables:
+   - For Windows users:
+   ```powershell
+   .\scripts\setup-env.ps1
+   ```
+   - For Linux/Mac users:
+   ```bash
+   chmod +x scripts/setup-env.sh
+   ./scripts/setup-env.sh
+   ```
+
+3. Review and update the generated `.env` file:
+   - The script will create a `.env` file based on `.env.example`
+   - It will automatically set the server IP and generate a JWT secret
+   - Update any other values as needed for your environment
+
+4. Install dependencies:
+```bash
+npm install
+```
+
+5. Build the applications:
+```bash
+npm run build
+```
+
+## Important Notes
+- The `.env` file contains sensitive information and should never be committed to version control
+- The `.env.example` file serves as a template and can be committed
+- Make sure to update the AWS credentials in the `.env` file if you're deploying to AWS
+- The JWT secret is automatically generated during setup, but you can change it if needed
+
+## Environment Variables
+The following environment variables are used in the application:
+
+### Server URLs
+- `SOURCE_APP_URL`: URL of the source application
+- `BRIDGE_SERVICE_URL`: URL of the bridge service
+- `TARGET_APP_URL`: URL of the target application
+- `FRONTEND_APP_URL`: URL of the frontend application
+
+### JWT Configuration
+- `JWT_SECRET`: Secret key for JWT token generation
+- `JWT_EXPIRES_IN`: JWT token expiration time
+
+### Node Environment
+- `NODE_ENV`: Node environment (development/production)
+
+### Ports
+- `SOURCE_APP_PORT`: Port for the source application
+- `BRIDGE_SERVICE_PORT`: Port for the bridge service
+- `TARGET_APP_PORT`: Port for the target application
+- `FRONTEND_APP_PORT`: Port for the frontend application
+
+### AWS Configuration
+- `AWS_REGION`: AWS region for deployment
+- `AWS_ACCESS_KEY_ID`: AWS access key ID
+- `AWS_SECRET_ACCESS_KEY`: AWS secret access key
+
+### Application Configuration
+- `EVENT_INTERVAL`: Interval between events in milliseconds
+- `TOTAL_EVENTS`: Total number of events to generate

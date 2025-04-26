@@ -269,7 +269,7 @@ jobs:
             SOURCE_PORT=$(find_available_port 3000)
           fi
           cd /var/www/app/apps/source-app
-          pm2 start dist/app.js --name "source-app" -- --port $SOURCE_PORT --host 127.0.0.1
+          pm2 start dist/app.js --name "source-app" -- --port $SOURCE_PORT --host 0.0.0.0
           
           # Bridge service
           if check_port 3001; then
@@ -279,7 +279,7 @@ jobs:
             BRIDGE_PORT=$(find_available_port 3001)
           fi
           cd /var/www/app/apps/bridge-service
-          pm2 start dist/app.js --name "bridge-service" -- --port $BRIDGE_PORT --host 127.0.0.1
+          pm2 start dist/app.js --name "bridge-service" -- --port $BRIDGE_PORT --host 0.0.0.0
           
           # Target app
           if check_port 3002; then
@@ -289,7 +289,7 @@ jobs:
             TARGET_PORT=$(find_available_port 3002)
           fi
           cd /var/www/app/apps/target-app
-          pm2 start dist/app.js --name "target-app" -- --port $TARGET_PORT --host 127.0.0.1
+          pm2 start dist/app.js --name "target-app" -- --port $TARGET_PORT --host 0.0.0.0
           
           # Frontend app
           if check_port 5173; then
@@ -299,7 +299,7 @@ jobs:
             FRONTEND_PORT=$(find_available_port 5173)
           fi
           cd /var/www/app/apps/event-monitor
-          pm2 start npm --name "frontend" -- run dev -- --host 127.0.0.1 --port $FRONTEND_PORT
+          pm2 start npm --name "frontend" -- run dev -- --host 0.0.0.0 --port $FRONTEND_PORT
           
           # Save PM2 process list
           pm2 save
@@ -333,7 +333,7 @@ jobs:
 
               # Source app
               location /source {
-                  proxy_pass http://127.0.0.1:${SOURCE_PORT};
+                  proxy_pass http://0.0.0.0:${SOURCE_PORT};
                   proxy_http_version 1.1;
                   proxy_set_header Upgrade \$http_upgrade;
                   proxy_set_header Connection 'upgrade';
@@ -346,7 +346,7 @@ jobs:
 
               # Bridge service
               location /bridge {
-                  proxy_pass http://127.0.0.1:${BRIDGE_PORT};
+                  proxy_pass http://0.0.0.0:${BRIDGE_PORT};
                   proxy_http_version 1.1;
                   proxy_set_header Upgrade \$http_upgrade;
                   proxy_set_header Connection 'upgrade';
@@ -359,7 +359,7 @@ jobs:
 
               # Target app
               location /target {
-                  proxy_pass http://127.0.0.1:${TARGET_PORT};
+                  proxy_pass http://0.0.0.0:${TARGET_PORT};
                   proxy_http_version 1.1;
                   proxy_set_header Upgrade \$http_upgrade;
                   proxy_set_header Connection 'upgrade';
@@ -372,7 +372,7 @@ jobs:
 
               # Frontend app
               location / {
-                  proxy_pass http://127.0.0.1:${FRONTEND_PORT};
+                  proxy_pass http://0.0.0.0:${FRONTEND_PORT};
                   proxy_http_version 1.1;
                   proxy_set_header Upgrade \$http_upgrade;
                   proxy_set_header Connection 'upgrade';

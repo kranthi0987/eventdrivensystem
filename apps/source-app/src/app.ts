@@ -8,7 +8,7 @@ const jwtService = new JWTService(jwtConfig);
 const app = express();
 app.use(express.json());
 
-const BRIDGE_SERVICE_URL = 'http://localhost:3001/api/events';
+const BRIDGE_SERVICE_URL = process.env.BRIDGE_SERVICE_URL || 'http://0.0.0.0:3001/api/events';
 const EVENT_INTERVAL = 300;
 const TOTAL_EVENTS = 50;
 

@@ -13,15 +13,15 @@ const swaggerOptions: swaggerJSDoc.Options = {
         },
         servers: [
             {
-                url: 'http://localhost:3000',
+                url: process.env.SOURCE_APP_URL || 'http://0.0.0.0:3000',
                 description: 'Source App Server'
             },
             {
-                url: 'http://localhost:3001',
+                url: process.env.BRIDGE_SERVICE_URL || 'http://0.0.0.0:3001',
                 description: 'Bridge Service Server'
             },
             {
-                url: 'http://localhost:3002',
+                url: process.env.TARGET_APP_URL || 'http://0.0.0.0:3002',
                 description: 'Target App Server (GraphQL)'
             }
         ],
